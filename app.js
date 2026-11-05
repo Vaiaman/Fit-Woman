@@ -2,9 +2,10 @@
 // unless she shares a backup or feedback herself.
 import { LIBRARY, SOURCES } from "./library.js";
 import * as L from "./logic.js";
+import * as G from "./generator.js";
 
 const KEY = "fitwoman.v1";
-const VERSION = "1.1";
+const VERSION = "1.2";
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -16,6 +17,7 @@ function load() {
     const d = { ...L.emptyData(), ...JSON.parse(raw) };
     d.weekPlans = d.weekPlans || [];
     d.settings = { restTimer: false, ...(d.settings || {}) };
+    d.savedPrograms = d.savedPrograms || [];
     return d;
   } catch (e) {
     localStorage.setItem(KEY + ".unreadable." + Date.now(), localStorage.getItem(KEY) || "");
@@ -23,7 +25,7 @@ function load() {
   }
 }
 let data = load();
-const ui = { tab: "training", openEx: null, schemaDay: null, schemaEx: null, progressEx: null, sheet: null, restStart: 0, restAdvice: 0, plan: null };
+const ui = { schemaView: "huidig", gen: null, tab: "training", openEx: null, schemaDay: null, schemaEx: null, progressEx: null, sheet: null, restStart: 0, restAdvice: 0, plan: null };
 
 function save() { localStorage.setItem(KEY, JSON.stringify(data)); }
 function update(f) { data = f(data); save(); render(); }
@@ -252,6 +254,12 @@ setInterval(() => { if (ui.restStart) renderTimer(); }, 1000);
 
 // ---------- Schema ----------
 function renderSchema() {
+  if (ui.schemaView === "mijn") return schemaTabs() + renderMySchemas();
+  if (ui.schemaView === "nieuw") return schemaTabs() + renderGenerator();
+  return schemaTabs() + renderCurrentSchema();
+}
+
+function renderCurrentSchema() {
   const p = data.program;
   const day = p.days.find((x) => x.id === ui.schemaDay) || p.days[0];
   ui.schemaDay = day.id;
@@ -327,6 +335,170 @@ function placeExercise(e) {
   ui.schemaEx = e.id;
   closeSheet();
 }
+
+// ---------- Schema: Mijn schema's and the questionnaire ----------
+const SCHEMA_VIEWS = [["huidig", "Huidig"], ["mijn", "Mijn schema's"], ["nieuw", "Nieuw schema"]];
+const CORE = ["goal", "focus", "days", "minutes", "level", "tech"];
+const EXTRA = ["place", "injuries", "likes", "intensity", "reps"];
+const STEPS = [...CORE, "more", ...EXTRA, "result"];
+const opt = (map, sel, action, multi = false) =>
+  `<div class="chips wrap">${Object.entries(map).map(([k, v]) => `<button class="chip ${(multi ? sel.includes(k) : sel === k) ? "on" : ""}" data-a="${action}" data-k="${esc(k)}">${esc(v)}</button>`).join("")}</div>`;
+
+function schemaTabs() {
+  return `<div class="seg" role="tablist" style="margin-bottom:12px">${SCHEMA_VIEWS.map(([id, label]) => `<button class="${ui.schemaView === id ? "on" : ""}" data-a="sView" data-id="${id}">${label}</button>`).join("")}</div>`;
+}
+
+/** Keeps the current schema in Mijn schema's before it is replaced, unless it is already there. */
+function withBackup(d) {
+  const same = JSON.stringify(d.program.days);
+  if ((d.savedPrograms || []).some((s) => JSON.stringify(s.program.days) === same)) return d;
+  return { ...d, savedPrograms: [...(d.savedPrograms || []), { id: "s" + Date.now(), name: `Vorig: ${d.program.name}`.slice(0, 60), savedAt: L.today(), program: d.program }] };
+}
+function useProgram(d, p) {
+  const b = withBackup(d);
+  return { ...b, program: { ...p, startDate: d.program.startDate }, draft: null, weekPlans: (b.weekPlans || []).filter((x) => x.monday < L.mondayOf(L.today())) };
+}
+
+function genState() {
+  if (!ui.gen) ui.gen = { a: { ...G.defaultAnswers("fitwoman"), ...(data.genAnswers || {}) }, step: 0, result: null, saved: false };
+  return ui.gen;
+}
+
+function renderGenerator() {
+  const g = genState(), a = g.a, id = STEPS[g.step];
+  const q = (title, hint, body) => `<section class="card"><h2 style="margin:0">${title}</h2><p class="small muted">${hint}</p>${body}</section>`;
+  let h = "";
+  if (id !== "result") {
+    // Endowed progress: the bar starts partly filled, which helps people finish.
+    const pct = 10 + (90 * g.step) / (STEPS.length - 2);
+    const label = g.step < CORE.length ? `Vraag ${g.step + 1} van ${CORE.length}` : id === "more" ? "De basis staat" : `Extra vraag ${g.step - CORE.length} van ${EXTRA.length}`;
+    h += `<p class="small muted">${label}</p><div class="cyclebar" style="margin-bottom:12px"><div style="width:${pct}%"></div></div>`;
+  }
+  const tech = [a.supersets && "superset", a.dropsets && "dropset"].filter(Boolean);
+  switch (id) {
+    case "goal": h += q("Wat is je hoofddoel?", "Bepaalt je herhalingen en rust.", opt(G.GOALS, a.goal, "gGoal")); break;
+    case "focus": h += q("Welke spiergroepen wil je extra laten groeien?", "Kies er maximaal 2, of geen voor een evenwichtig schema.", opt({ "": "Geen voorkeur", ...G.FOCUS }, a.focus.length ? a.focus : [""], "gFocus", true)); break;
+    case "days": h += q("Hoeveel dagen per week wil je trainen?", "Lukt het een week niet, dan schuif je met Plan je week in Coach.", field("Dagen per week", a.days, "gDays")); break;
+    case "minutes": h += q("Hoe lang mag een training maximaal duren?", "Inclusief warming-up en rust.", opt(Object.fromEntries(G.MINUTES.map((m) => [m, m + " min"])), String(a.minutes), "gMin")); break;
+    case "level": h += q("Hoe lang train je al serieus met gewichten?", "Bepaalt hoeveel sets je per week krijgt.", opt(G.LEVELS, a.level, "gLevel")); break;
+    case "tech": h += q("Wil je supersets of dropsets?", "Ze besparen tijd. Ik zet ze alleen bij isolatie-oefeningen.", opt({ superset: "Supersets", dropset: "Dropsets", "": "Geen" }, tech.length ? tech : [""], "gTech", true)); break;
+    case "more":
+      h += `<section class="card hl"><h2 style="margin:0">Nog persoonlijker?</h2><p class="small">Nog 5 korte vragen over je sportschool, klachten, favoriete oefeningen en hoe zwaar je wilt trainen. Duurt ongeveer een minuut.</p>
+        <button class="btn primary block" data-a="gTo" data-to="${STEPS.indexOf("result")}">Maak mijn schema</button><button class="btn outline block" data-a="gNext">Nog 5 vragen</button></section>`;
+      break;
+    case "place": h += q("Waar train je?", "Ik kies alleen oefeningen die daar kunnen.", opt(G.PLACES, a.place, "gPlace")); break;
+    case "injuries": h += q("Heb je klachten of blessures?", "Oefeningen die ze kunnen prikkelen laat ik weg. Dit vervangt geen fysiotherapeut.", opt({ "": "Geen", ...G.INJURIES }, a.injuries.length ? a.injuries : [""], "gInj", true)); break;
+    case "likes": {
+      const rows = Object.entries(L.MUSCLES).map(([m, label]) => {
+        const list = LIBRARY.filter((e) => L.primaryMuscle(e) === m);
+        if (!list.length) return "";
+        return `<div class="label accent" style="margin-top:8px">${label}</div>` + list.map((e) => {
+          const st = a.likes.includes(e.id) ? 1 : a.dislikes.includes(e.id) ? 2 : 0;
+          return `<button class="list-row" style="width:100%;text-align:left" data-a="gLike" data-id="${e.id}"><span class="grow">${esc(e.name)}</span><b class="small" style="color:${["var(--muted)", "var(--done)", "var(--warn, #E5935F)"][st]}">${["–", "Graag", "Liever niet"][st]}</b></button>`;
+        }).join("");
+      }).join("");
+      h += `<div class="row" style="margin-bottom:12px"><button class="btn outline grow" data-a="gBack">Terug</button><button class="btn primary grow" style="flex:2" data-a="gNext">${a.likes.length || a.dislikes.length ? "Volgende" : "Overslaan"}</button></div>`;
+      h += q("Welke oefeningen doe je graag, of liever niet?", "Tik om te wisselen: Graag krijgt voorrang, Liever niet kies ik nooit. Overslaan mag.", rows);
+      break;
+    }
+    case "intensity": h += q("Hoe zwaar wil je trainen?", "RIR is hoeveel herhalingen je nog had gekund. Dichter bij falen geeft iets meer groei, maar kost meer herstel.", opt(G.INTENSITY, a.intensity, "gInt")); break;
+    case "reps": h += q("Welk herhalingsbereik vind je prettig?", "Voor spiergroei werkt elk bereik van ongeveer 5 tot 20, dus kies wat je fijn vindt [32].", opt(G.REPS, a.reps, "gReps")); break;
+    case "result": {
+      const r = g.result;
+      if (!r) {
+        // A short build moment that shows the rules at work: visible effort makes the result more trusted.
+        h += `<section class="card"><h2 style="margin:0">Je schema wordt gebouwd</h2>${["Sets per spier berekenen", "Dagen over je week verdelen", "Oefeningen kiezen", "Passend maken in je tijd"].map((s, i) => `<p class="small build" style="animation-delay:${i * 0.33}s">✓ ${s}</p>`).join("")}</section>`;
+        if (!g.timer) g.timer = setTimeout(() => { g.timer = null; g.result = G.generate(g.a); render(); }, 1400);
+        break;
+      }
+      h += `<section class="card hl"><span class="label accent">Jouw schema</span><h2 style="margin:0">${esc(r.program.name)}</h2>${r.summary.map((s) => `<p class="small">• ${esc(s)}</p>`).join("")}</section>`;
+      for (const d of r.program.days) {
+        h += `<section class="card"><div class="row"><h3 class="grow" style="margin:0">${esc(d.name)}</h3><span class="small muted">± ${G.minutesOf(d.exercises)} min</span></div>
+          ${d.exercises.map((e) => `<div class="row small"><span class="grow">${esc(e.name)}${L.isGlute(e) ? ' <span class="pill glute">bil</span>' : ""}${e.supersetWithNext ? " ↓ superset" : ""}</span><span class="muted">${e.sets} × ${e.bodyweight ? "AMRAP" : `${e.repMin}–${e.repMax}`}${e.rir != null ? ` · ${e.rir} RIR` : ""}${e.dropSets ? " · +drop" : ""}</span></div>`).join("")}</section>`;
+      }
+      h += `<button class="btn primary block big" data-a="gUse">Gebruik dit schema</button>
+        <button class="btn outline block" data-a="gSave" ${g.saved ? "disabled" : ""}>${g.saved ? "Bewaard in Mijn schema's" : "Alleen bewaren in Mijn schema's"}</button>
+        <button class="link" data-a="gTo" data-to="0">Antwoorden aanpassen</button><p class="small muted">Na het kiezen kun je alles nog aanpassen onder Huidig.</p>`;
+    }
+  }
+  if (id !== "result" && id !== "more") {
+    const nextLabel = STEPS[g.step + 1] === "result" ? "Maak mijn schema" : "Volgende";
+    h += `<div class="row">${g.step > 0 ? `<button class="btn outline grow" data-a="gBack">Terug</button>` : ""}<button class="btn primary grow" style="flex:2" data-a="gNext">${nextLabel}</button></div>`;
+  }
+  return h;
+}
+
+function renderMySchemas() {
+  const saved = [...(data.savedPrograms || [])].reverse();
+  let h = `<section class="card"><span class="label accent">Huidig schema</span><h3 style="margin:0">${esc(data.program.name)}</h3>
+    <p class="small muted">${data.program.days.length} dagen · ${data.program.days.reduce((n, d) => n + d.exercises.length, 0)} oefeningen</p>
+    <div class="row"><button class="link" data-a="msSaveCur">Bewaar onder een naam</button><button class="link" data-a="msShare" data-id="">Delen</button></div></section>
+    <div class="row"><button class="btn outline grow" data-a="sView" data-id="nieuw">Nieuw schema</button><button class="btn outline grow" data-a="msPaste">Code plakken</button></div>`;
+  if (!saved.length) h += `<div class="empty">Nog niets bewaard. Bewaar je huidige schema, maak een nieuw schema met de vragenlijst of plak een code die iemand met je deelde.</div>`;
+  for (const s of saved) {
+    h += `<section class="card"><h3 style="margin:0">${esc(s.name)}</h3><p class="small muted">${s.program.days.length} dagen · ${esc(s.program.days.map((d) => d.name).join(", "))} · bewaard ${L.niceDate(s.savedAt)}</p>
+      <div class="row"><button class="link" data-a="msUse" data-id="${s.id}">Gebruik</button><button class="link" data-a="msShare" data-id="${s.id}">Delen</button><button class="link" data-a="msRename" data-id="${s.id}">Naam</button><button class="link warn" data-a="msDel" data-id="${s.id}">Wis</button></div></section>`;
+  }
+  return h;
+}
+
+const savedById = (id) => (data.savedPrograms || []).find((s) => s.id === id);
+function nameSheet(title, current, onSave) {
+  ui.nameSave = onSave;
+  openSheet(() => `<h2>${title}</h2><input class="text" id="schemaName" value="${esc(current)}" maxlength="60"><div class="actions"><button class="link muted" data-a="close">Annuleren</button><button class="btn primary" data-a="nameOk">Bewaar</button></div>`);
+  setTimeout(() => $("#schemaName")?.select(), 50);
+}
+const genActions = {
+  sView: (t) => { ui.schemaView = t.dataset.id; if (t.dataset.id === "nieuw" && ui.gen && STEPS[ui.gen.step] === "result") ui.gen = null; render(); },
+  gGoal: (t) => { genState().a.goal = t.dataset.k; render(); },
+  gFocus: (t) => {
+    const a = genState().a, k = t.dataset.k;
+    a.focus = !k ? [] : a.focus.includes(k) ? a.focus.filter((x) => x !== k) : a.focus.length >= 2 ? [...a.focus.slice(1), k] : [...a.focus, k];
+    render();
+  },
+  gDays: (t) => { const a = genState().a; a.days = Math.min(6, Math.max(1, a.days + +t.dataset.by)); render(); },
+  gMin: (t) => { genState().a.minutes = +t.dataset.k; render(); },
+  gLevel: (t) => { genState().a.level = t.dataset.k; render(); },
+  gTech: (t) => { const a = genState().a, k = t.dataset.k; if (k === "superset") a.supersets = !a.supersets; else if (k === "dropset") a.dropsets = !a.dropsets; else { a.supersets = false; a.dropsets = false; } render(); },
+  gPlace: (t) => { genState().a.place = t.dataset.k; render(); },
+  gInj: (t) => { const a = genState().a, k = t.dataset.k; a.injuries = !k ? [] : a.injuries.includes(k) ? a.injuries.filter((x) => x !== k) : [...a.injuries, k]; render(); },
+  gLike: (t) => {
+    const a = genState().a, id = t.dataset.id;
+    if (a.likes.includes(id)) { a.likes = a.likes.filter((x) => x !== id); a.dislikes = [...a.dislikes, id]; }
+    else if (a.dislikes.includes(id)) a.dislikes = a.dislikes.filter((x) => x !== id);
+    else a.likes = [...a.likes, id];
+    render();
+  },
+  gInt: (t) => { genState().a.intensity = t.dataset.k; render(); },
+  gReps: (t) => { genState().a.reps = t.dataset.k; render(); },
+  gNext: () => { const g = genState(); genActions.gTo({ dataset: { to: g.step + 1 } }); },
+  gBack: () => { const g = genState(); g.step = Math.max(0, g.step - (STEPS[g.step - 1] === "more" ? 2 : 1)); render(); window.scrollTo(0, 0); },
+  gTo: (t) => { const g = genState(); g.step = Math.min(STEPS.length - 1, Math.max(0, +t.dataset.to)); g.result = null; g.saved = false; render(); window.scrollTo(0, 0); },
+  gUse: () => confirmSheet("Dit schema gebruiken?", "Je huidige schema wordt bewaard in Mijn schema's, zodat je altijd terug kunt. Gelogde trainingen, records en je startdatum blijven staan. Een weekplanning voor deze week vervalt; plan hem opnieuw in Coach.", "Gebruiken", () => {
+    const g = genState();
+    update((d) => ({ ...useProgram(d, g.result.program), genAnswers: g.a }));
+    ui.gen = null; ui.schemaView = "huidig"; ui.schemaDay = null; render(); toast("Nieuw schema staat klaar");
+  }),
+  gSave: () => {
+    const g = genState();
+    g.saved = true;
+    update((d) => ({ ...d, genAnswers: g.a, savedPrograms: [...(d.savedPrograms || []), { id: "s" + Date.now(), name: g.result.program.name, savedAt: L.today(), program: g.result.program }] }));
+  },
+  msSaveCur: () => nameSheet("Naam voor dit schema", data.program.name, (name) => update((d) => ({ ...d, savedPrograms: [...(d.savedPrograms || []), { id: "s" + Date.now(), name, savedAt: L.today(), program: d.program }] }))),
+  msRename: (t) => { const s = savedById(t.dataset.id); nameSheet("Naam wijzigen", s.name, (name) => update((d) => ({ ...d, savedPrograms: d.savedPrograms.map((x) => (x.id === s.id ? { ...x, name } : x)) }))); },
+  nameOk: () => { const n = $("#schemaName").value.trim(); if (!n) return toast("Geef het schema een naam"); const f = ui.nameSave; ui.nameSave = null; closeSheet(); f?.(n); },
+  msShare: (t) => { const s = t.dataset.id ? savedById(t.dataset.id) : null; const p = s ? { ...s.program, name: s.name } : data.program; shareText(p.name, G.shareTextOf(p)); },
+  msUse: (t) => { const s = savedById(t.dataset.id); confirmSheet(`${esc(s.name)} gebruiken?`, "Je huidige schema blijft bewaard in Mijn schema's. Gelogde trainingen, records en je startdatum blijven staan.", "Gebruiken", () => { update((d) => useProgram(d, { ...s.program, name: s.name })); ui.schemaView = "huidig"; ui.schemaDay = null; render(); }); },
+  msDel: (t) => { const s = savedById(t.dataset.id); confirmSheet(`${esc(s.name)} wissen?`, "Alleen dit bewaarde schema gaat weg. Je huidige schema en je trainingen blijven staan.", "Wissen", () => update((d) => ({ ...d, savedPrograms: d.savedPrograms.filter((x) => x.id !== s.id) }))); },
+  msPaste: () => openSheet(() => `<h2>Code plakken</h2><p class="small muted">Plak het hele bericht of alleen de code die begint met FITSCHEMA1. Het schema komt in Mijn schema's.</p><textarea class="text" id="pasteCode"></textarea><div class="actions"><button class="link muted" data-a="close">Annuleren</button><button class="btn primary" data-a="pasteOk">Toevoegen</button></div>`),
+  pasteOk: () => {
+    const p = G.parseShared($("#pasteCode").value);
+    if (!p) return toast("Dit lijkt geen schemacode. Kopieer het bericht opnieuw.");
+    closeSheet();
+    update((d) => ({ ...d, savedPrograms: [...(d.savedPrograms || []), { id: "s" + Date.now(), name: p.name, savedAt: L.today(), program: { ...p, startDate: d.program.startDate } }] }));
+    toast("Toegevoegd aan Mijn schema's");
+  },
+};
 
 // ---------- Progress ----------
 function renderProgress() {
@@ -714,6 +886,8 @@ document.addEventListener("change", (ev) => {
 document.addEventListener("input", (ev) => {
   if (ev.target.dataset.in === "pickQ") { ui.pick.q = ev.target.value; renderSheet(); }
 });
+
+Object.assign(actions, genActions);
 
 // Schema stepper buttons share one handler per field.
 for (const k of Object.keys(clampEx)) actions[k] = (t) => editProgram((p) => L.updateExercise(p, ui.schemaDay, t.dataset.id, (e) => clampEx[k](e, +t.dataset.by)));

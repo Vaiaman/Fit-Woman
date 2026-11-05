@@ -106,7 +106,7 @@ export function fourthDay() {
 }
 
 export function emptyData() {
-  return { version: 1, program: starterProgram(), sessions: [], weights: [], draft: null, customExercises: [], feedback: [], weekPlans: [], settings: { restTimer: false } };
+  return { version: 1, program: starterProgram(), sessions: [], weights: [], draft: null, customExercises: [], feedback: [], weekPlans: [], savedPrograms: [], genAnswers: null, settings: { restTimer: false } };
 }
 
 // ---------- lookups ----------

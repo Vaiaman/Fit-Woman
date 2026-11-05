@@ -192,3 +192,7 @@ nav.tabs button.on svg { background: var(--primary); color: #fff; }
 .topic > button { display: flex; align-items: center; width: 100%; min-height: 48px; text-align: left; gap: 8px; }
 .topic > button svg { width: 20px; height: 20px; color: var(--muted); }
 .topic p { padding-bottom: 12px; }
+.chips.wrap { flex-wrap: wrap; overflow: visible; }
+.build { opacity: 0; animation: buildIn .3s ease forwards; }
+@keyframes buildIn { to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .build { animation: none; opacity: 1; } }

@@ -87,5 +87,9 @@ export const SOURCES = [
   "Colenso-Semple et al. (2023). Current evidence shows no influence of women's menstrual cycle phase on acute strength performance or adaptations to resistance exercise training. Frontiers in Sports and Active Living.",
   "McNulty et al. (2020). The effects of menstrual cycle phase on exercise performance in eumenorrheic women: a systematic review and meta-analysis. Sports Medicine.",
   "Lally, van Jaarsveld, Potts & Wardle (2010). How are habits formed: modelling habit formation in the real world. European Journal of Social Psychology.",
-  "Bickel, Cross & Bamman (2011). Exercise dosing to retain resistance training adaptations in young and older adults. Medicine & Science in Sports & Exercise."
+  "Bickel, Cross & Bamman (2011). Exercise dosing to retain resistance training adaptations in young and older adults. Medicine & Science in Sports & Exercise.",
+  "Schoenfeld, Grgic, Van Every & Plotkin (2021). Loading recommendations for muscle strength, hypertrophy, and local endurance: a re-examination of the repetition continuum. Sports.",
+  "Iversen et al. (2021). No time to lift? Designing time-efficient training programs for strength and hypertrophy. Sports Medicine.",
+  "Krzysztofik et al. (2019). Maximizing muscle hypertrophy: a systematic review of advanced resistance training techniques and methods. International Journal of Environmental Research and Public Health.",
+  "Sødal et al. (2023). Effects of drop sets on skeletal muscle hypertrophy: a systematic review and meta-analysis. Sports Medicine - Open."
 ];
