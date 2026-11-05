@@ -298,3 +298,16 @@ nav.tabs button.on svg { background: var(--primary); color: #fff; }
 .tour-dots i.on { background: var(--accent); }
 .tour-dots i.now { width: 18px; background: var(--accent); opacity: .55; }
 @media (prefers-reduced-motion: reduce) { .tour-spot { transition: none; } }
+
+/* Sets per exercise: a stepper on the schema card, and +/− set for today in Training */
+.setstep { display: flex; align-items: center; background: var(--surface2); border-radius: 12px; flex: 0 0 auto; }
+.setstep.adj { box-shadow: inset 0 0 0 1px var(--accent); }
+.setstep button { width: 40px; height: 48px; color: var(--accent); font-size: 22px; font-weight: 700; }
+.setstep button:disabled { color: var(--line); }
+.setstep span { min-width: 34px; text-align: center; line-height: 1; }
+.setstep b { display: block; font-family: var(--display); font-size: 20px; }
+.setstep small { font-size: 10px; color: var(--muted); }
+.volnote { font-size: 13px; line-height: 18px; margin: 0; padding: 8px 10px; border-radius: 10px; background: var(--surface2); }
+.volnote.warn { background: var(--tip); }
+.setadj { min-height: 36px; }
+.setadj .link { font-size: 14px; }

@@ -9,7 +9,7 @@ import { exerciseSvg, hasDrawing } from "./exviz.js";
 const KEY = "fitman.v1";
 /** Fit Woman stored its data under this key on the same address; it is read once and left in place as a backup. */
 const LEGACY = "fitwoman.v1";
-const VERSION = "2.2";
+const VERSION = "2.3";
 const A = window.FitmanAndroid || null;
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -230,6 +230,11 @@ function renderTraining() {
           ${p ? `<div class="prev">Vorige keer ${L.fmt(p.kg)} kg × ${p.reps}${p.rir != null ? ` · ${p.rir} RIR` : ""}${s.goal ? ` · doel ${s.goal}` : ""}</div>` : ""}
         </div>`;
       });
+      // A set more or less for today only; the schema stays as it is unless the user makes it stick.
+      const work = sets.filter((s) => !s.drop), extra = dr.extra?.[slot.id] || 0, lastWork = work[work.length - 1];
+      h += `<div class="row setadj"><button class="link" data-a="todaySet" data-id="${slot.id}" data-idx="${idx}" data-by="1" ${work.length >= L.MAX_SETS ? "disabled" : ""}>+ Set erbij</button>
+        ${work.length > 1 && !lastWork?.done ? `<button class="link muted" data-a="todaySet" data-id="${slot.id}" data-idx="${idx}" data-by="-1">− Set eraf</button>` : ""}</div>`;
+      if (extra) h += `<div class="row setadj"><span class="tiny muted grow">Alleen vandaag ${extra > 0 ? "+" : "−"}${Math.abs(extra)} ${Math.abs(extra) === 1 ? "set" : "sets"}. In je schema staan er ${slot.sets}.</span><button class="link" data-a="todayToSchema" data-id="${slot.id}" data-idx="${idx}">Vast in schema</button></div>`;
       // Progressive disclosure: the tip is one tap away instead of pushing the sets down.
       if (e.tip) {
         const tipOpen = ui.tip[slot.id] ?? P().tipsOpen;
@@ -359,7 +364,7 @@ function renderCurrentSchema() {
   const groups = L.supersetLabels(day.exercises);
   const tech = P().techniques;
   let h = `<section class="card row"><div class="grow"><span class="label muted">Huidig schema</span><h3>${esc(p.name)}</h3><p class="small muted">${p.days.length} ${p.days.length === 1 ? "dag" : "dagen"} · ${L.weeklyTarget(data)}× per week</p></div><button class="btn outline sm" data-a="msShare" data-id="">Delen</button></section>
-    <p class="small muted">Tik op een oefening om sets, reps, rust en stapgrootte aan te passen. Alles wordt meteen bewaard.</p>
+    <p class="small muted">Pas het aantal sets aan met − en +. Tik op een oefening voor reps, rust en stapgrootte. Alles wordt meteen bewaard.</p>
     <div class="chips">${p.days.map((d) => `<button class="chip ${d.id === day.id ? "on" : ""}" data-a="sDay" data-id="${d.id}">${esc(d.name)}</button>`).join("")}${p.days.length < 7 ? `<button class="chip add" data-a="addDay">+ Dag</button>` : ""}</div>
     <section class="card"><div class="row"><div class="grow"><h2 style="margin:0">${esc(day.name)}</h2><p class="small muted">${day.exercises.length} oefeningen · ${day.exercises.reduce((a, e) => a + e.sets, 0)} sets · ± ${L.estimatedMinutes(day)} min</p></div>
       <button class="iconbtn" data-a="moveDay" data-by="-1" aria-label="Dag naar voren">${svg("up")}</button><button class="iconbtn" data-a="moveDay" data-by="1" aria-label="Dag naar achteren">${svg("down")}</button></div>
@@ -367,12 +372,15 @@ function renderCurrentSchema() {
   if (!day.exercises.length) h += `<div class="empty">Nog geen oefeningen op ${esc(day.name)}. Voeg hieronder je eerste oefening toe.</div>`;
   day.exercises.forEach((e, i) => {
     const open = ui.schemaEx === e.id;
-    h += `<section class="card"><button class="ex-head" data-a="sEx" data-id="${e.id}" aria-expanded="${open}">
-      <div class="grow">${groups[i] ? `<div class="label" style="color:var(--done)">Superset ${groups[i]}</div>` : ""}<h3>${esc(e.name)}${gPill(e)}</h3>
-      <div class="small muted">${e.sets} × ${e.bodyweight ? "AMRAP" : `${e.repMin}–${e.repMax}`}${P().rir && e.rir != null ? ` · ${e.rir} RIR` : ""}${e.dropSets ? ` · +${e.dropSets} drop` : ""} · rust ${restText(e.rest)}</div></div></button>`;
+    // The sets stepper sits on the card itself: the most-changed setting needs no extra tap (Fogg 2009, ability).
+    h += `<section class="card"><div class="ex-head"><button class="grow" style="text-align:left" data-a="sEx" data-id="${e.id}" aria-expanded="${open}">
+      ${groups[i] ? `<div class="label" style="color:var(--done)">Superset ${groups[i]}</div>` : ""}<h3>${esc(e.name)}${gPill(e)}</h3>
+      <div class="small muted">${e.bodyweight ? "AMRAP" : `${e.repMin}–${e.repMax} reps`}${P().rir && e.rir != null ? ` · ${e.rir} RIR` : ""}${e.dropSets ? ` · +${e.dropSets} drop` : ""} · rust ${restText(e.rest)}</div></button>
+      ${setStepper(e, p.buildUp)}</div>`;
+    if (ui.setsNote === e.id) h += volumeNote(e, week);
     if (open) {
       const x = `data-id="${e.id}"`;
-      h += (p.buildUp ? `<p class="small muted">Sets volgen de opbouw: deze week ${e.sets}.</p>` : field("Sets", e.sets, "exSets", x))
+      h += (p.buildUp ? `<p class="small muted">${buildUpNote(raw.exercises.find((r) => r.id === e.id))}</p>` : "")
         + (e.bodyweight ? "" : field("Reps minimaal", e.repMin, "exMin", x) + field("Reps maximaal", e.repMax, "exMax", x))
         + field("Rust", restText(e.rest), "exRest", x)
         + field("Gewichtsstap", L.fmt(e.inc) + " kg", "exInc", x)
@@ -393,8 +401,32 @@ function renderCurrentSchema() {
   return h;
 }
 
+/** Compact − 3 sets + control; with build-up on it shows this week's sets. */
+function setStepper(e, buildUp) {
+  const x = `data-a="exSets" data-id="${e.id}"`;
+  return `<div class="setstep${buildUp && e.setsAdj ? " adj" : ""}"><button ${x} data-by="-1" ${e.sets <= 1 ? "disabled" : ""} aria-label="Een set minder voor ${esc(e.name)}">−</button>
+    <span aria-live="polite"><b>${e.sets}</b><small>${e.sets === 1 ? "set" : "sets"}</small></span>
+    <button ${x} data-by="1" ${e.sets >= L.MAX_SETS ? "disabled" : ""} aria-label="Een set meer voor ${esc(e.name)}">+</button></div>`;
+}
+function buildUpNote(e) {
+  const adj = e?.setsAdj || 0;
+  return `Opbouw staat aan: het getal hierboven is deze week. ${adj ? `Jij zit ${adj > 0 ? "+" : "−"}${Math.abs(adj)} ${Math.abs(adj) === 1 ? "set" : "sets"} naast de opbouw; de opbouw telt daar bovenop.` : "Pas je de sets aan, dan telt de opbouw bovenop jouw keuze."}`;
+}
+/**
+ * Right after a change: where this muscle lands per week. Informs, never blocks; the user keeps the
+ * choice (autonomy, Deci & Ryan 2000). Ranges from [4, 5]; glute focus may sit higher.
+ */
+function volumeNote(e, week) {
+  const m = L.primaryMuscle(e);
+  if (!m) return "";
+  const v = L.muscleSets(data.program, week)[m] || 0, name = L.MUSCLES[m], hi = gluteFocus() && m === "bilspieren" ? 24 : 20;
+  const t = v > hi ? `${name} komt op ${L.fmt(v)} sets per week. Daarboven groeit een spier gemiddeld nog maar een beetje per extra set en wordt herstel lastiger [4, 5]. Herstel je goed, dan kan het prima.`
+    : v < 10 ? `${name} komt op ${L.fmt(v)} sets per week. Genoeg om te onderhouden; voor zichtbare groei is 10 of meer een goede richtlijn [4, 5].`
+    : `${name} komt op ${L.fmt(v)} sets per week, binnen de werkrange van 10–20 [4, 5].`;
+  return `<p class="volnote ${v > hi || v < 10 ? "warn" : "ok"}">${t}</p>`;
+}
+
 const clampEx = {
-  exSets: (e, by) => ({ ...e, sets: Math.min(8, Math.max(1, e.sets + by)) }),
   exMin: (e, by) => ({ ...e, repMin: Math.min(e.repMax, Math.max(1, e.repMin + by)) }),
   exMax: (e, by) => ({ ...e, repMax: Math.min(50, Math.max(e.repMin, e.repMax + by)) }),
   exRest: (e, by) => ({ ...e, rest: Math.min(300, Math.max(30, e.rest + by * 15)) }),
@@ -1163,7 +1195,7 @@ const actions = {
     const swaps = { ...dr.swaps };
     if (pick.id === slot.id) delete swaps[slot.id]; else swaps[slot.id] = pick.id;
     ui.openEx = slot.id;
-    update((d) => ({ ...d, draft: { ...dr, swaps, items: { ...dr.items, [slot.id]: L.draftSets(d, pick, slot.sets, slot.dropSets) } } }));
+    update((d) => ({ ...d, draft: { ...dr, swaps, items: { ...dr.items, [slot.id]: L.draftSets(d, pick, L.todaySets(dr, slot), slot.dropSets) } } }));
   },
   kgStep: (t) => {
     const dr = currentDraft(); const day = L.findDayNow(data, dr.dayId);
@@ -1183,7 +1215,7 @@ const actions = {
   },
   restStop: () => { ui.restStart = 0; renderTimer(); },
 
-  sDay: (t) => { ui.schemaDay = t.dataset.id; ui.schemaEx = null; render(); },
+  sDay: (t) => { ui.schemaDay = t.dataset.id; ui.schemaEx = null; ui.setsNote = null; render(); },
   addDay: () => { const id = "d" + Date.now(); editProgram((p) => L.addDay(p, id)); ui.schemaDay = id; render(); },
   moveDay: (t) => editProgram((p) => L.moveDay(p, ui.schemaDay, +t.dataset.by)),
   copyDay: () => { const id = "d" + Date.now(); editProgram((p) => L.duplicateDay(p, ui.schemaDay, id)); ui.schemaDay = id; render(); },
@@ -1197,7 +1229,7 @@ const actions = {
     const day = data.program.days.find((x) => x.id === ui.schemaDay);
     confirmSheet(`${esc(day.name)} verwijderen?`, "De dag en zijn oefeningen gaan uit je schema. Trainingen die je al gelogd hebt blijven bewaard.", "Verwijderen", () => { editProgram((p) => L.removeDay(p, day.id)); ui.schemaDay = null; render(); });
   },
-  sEx: (t) => { ui.schemaEx = ui.schemaEx === t.dataset.id ? null : t.dataset.id; render(); },
+  sEx: (t) => { ui.schemaEx = ui.schemaEx === t.dataset.id ? null : t.dataset.id; ui.setsNote = null; render(); },
   exSuper: (t) => editProgram((p) => L.updateExercise(p, ui.schemaDay, t.dataset.id, (e) => ({ ...e, supersetWithNext: !e.supersetWithNext }))),
   exMove: (t) => editProgram((p) => L.moveExercise(p, ui.schemaDay, t.dataset.id, +t.dataset.by)),
   exRemove: (t) => { ui.schemaEx = null; editProgram((p) => L.removeExercise(p, ui.schemaDay, t.dataset.id)); },
@@ -1304,6 +1336,26 @@ Object.assign(actions, genActions, tourActions);
 
 // Schema stepper buttons share one handler per field.
 for (const k of Object.keys(clampEx)) actions[k] = (t) => editProgram((p) => L.updateExercise(p, ui.schemaDay, t.dataset.id, (e) => clampEx[k](e, +t.dataset.by)));
+actions.todaySet = (t) => {
+  const dr = currentDraft(), slot = L.findDayNow(data, dr.dayId).exercises[+t.dataset.idx];
+  data.draft = L.stepTodaySets(dr, slot, +t.dataset.by);
+  save(); render();
+};
+/** Makes today's set count the schema's: from the next workout on, too. */
+actions.todayToSchema = (t) => {
+  const dr = currentDraft(), slot = L.findDayNow(data, dr.dayId).exercises[+t.dataset.idx];
+  const extra = dr.extra?.[slot.id] || 0, dayId = dr.dayId, week = Math.min(12, L.currentWeek(data));
+  const rest = { ...(dr.extra || {}) }; delete rest[slot.id];
+  data.draft = { ...dr, extra: rest };
+  let p = data.program;
+  for (let i = 0; i < Math.abs(extra); i++) p = L.stepSets(p, dayId, slot.id, Math.sign(extra), week);
+  editProgram(() => p);
+  toast(`${slot.name}: voortaan ${L.findDayNow(data, dayId).exercises[+t.dataset.idx].sets} sets in je schema.`);
+};
+actions.exSets = (t) => {
+  ui.setsNote = t.dataset.id;
+  editProgram((p) => L.stepSets(p, ui.schemaDay, t.dataset.id, +t.dataset.by, Math.min(12, L.currentWeek(data))));
+};
 
 // A new day: today's draft may be stale.
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { if (data) refreshHealth(); render(); } else syncWake(); });
