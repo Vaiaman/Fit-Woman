@@ -1,4 +1,4 @@
-// Training logic for Fit Woman: a port of the Fitman Max Kotlin code (Training.kt, Schema.kt),
+// Training logic for Fitman: a port of the Fitman Kotlin code (Training.kt, Schema.kt),
 // kept free of DOM code so it can be tested with plain Node.
 import { LIBRARY } from "./library.js";
 
@@ -49,6 +49,53 @@ function ex(id, sets, repMin, repMax, opts = {}) {
     rir: base.rest >= 120 ? 2 : 1, dropSets: opts.drops ?? 0, supersetWithNext: !!opts.superset, cue: "",
   };
 }
+
+/** Library exercise with a cue and optional rep range, sets and RIR as in the library (Fitman, DefaultProgram.kt). */
+function base(id, cue = "", repMin, repMax) {
+  const b = LIB[id];
+  if (!b) throw new Error("Unknown exercise " + id);
+  return { ...b, cue, repMin: repMin ?? b.repMin, repMax: repMax ?? b.repMax, rir: null, dropSets: 0, supersetWithNext: false };
+}
+
+/** Vai's 2-day full body plan (cycle 1 baseline). Sets build up from 3 to 4 over the cycle. */
+export function fullBodyProgram() {
+  return {
+    name: "Full body · 2 dagen", startDate: firstMonday(), buildUp: true, weeklyTarget: 2,
+    days: [
+      { id: "d1", name: "Dag 1", exercises: [
+        base("incline-db-press", "bracen"), base("chest-supported-row", "bracen"), base("barbell-squat"),
+        base("flat-chest-press-machine"), base("facepulls"), base("chest-fly"),
+      ] },
+      { id: "d2", name: "Dag 2", exercises: [
+        base("hack-squat", "bracen + diepte"), base("pull-ups", "bracen"), base("shoulder-press-db", "diepte"),
+        base("incline-sm-press"), base("lat-pulldown", "neutrale rug"), base("butterfly-raise", "", 10, 12),
+      ] },
+    ],
+  };
+}
+
+/** Push/pull/legs twice a week, so every muscle gets two sessions a week [1, 2] (Fitman Max, MaxProgram.kt). */
+export function pplProgram() {
+  const x = (id, sets, repMin, repMax, opts = {}) => ex(id, sets, repMin, repMax, opts);
+  return {
+    name: "Push / pull / legs × 2", startDate: mondayOf(today()), buildUp: false,
+    days: [
+      { id: "p1", name: "Push A", exercises: [x("barbell-bench-press", 4, 5, 8), x("incline-db-press", 3, 8, 10), x("smith-shoulder-press", 3, 6, 10), x("cable-lateral-raise", 4, 10, 15, { drops: 1 }), x("overhead-triceps-extension", 3, 8, 12)] },
+      { id: "l1", name: "Pull A", exercises: [x("pull-ups", 4), x("chest-supported-row", 3, 8, 10), x("lat-pulldown", 3, 8, 12), x("reverse-pec-deck", 3, 10, 15), x("incline-db-curl", 3, 8, 12)] },
+      { id: "g1", name: "Legs A", exercises: [x("barbell-squat", 4, 5, 8), x("romanian-deadlift", 3, 6, 10), x("leg-extension", 3, 10, 15), x("seated-leg-curl", 3, 8, 12), x("standing-calf-raise", 4, 8, 12)] },
+      { id: "p2", name: "Push B", exercises: [x("incline-sm-press", 4, 6, 10), x("machine-shoulder-press", 3, 8, 10), x("cable-fly", 3, 10, 15), x("db-lateral-raise", 4, 10, 15, { superset: true }), x("triceps-pushdown", 3, 10, 15)] },
+      { id: "l2", name: "Pull B", exercises: [x("barbell-row", 4, 6, 10), x("single-arm-cable-row", 3, 8, 12), x("lat-pulldown", 3, 10, 12), x("facepulls", 3, 10, 15), x("preacher-curl", 3, 8, 12)] },
+      { id: "g2", name: "Legs B", exercises: [x("hack-squat", 4, 6, 10), x("hip-thrust", 3, 8, 12), x("bulgarian-split-squat", 3, 8, 10), x("lying-leg-curl", 3, 10, 12), x("seated-calf-raise", 4, 10, 15), x("cable-crunch", 3, 10, 15)] },
+    ],
+  };
+}
+
+/** The three starting points of the merged app, keyed as in the welcome screen. */
+export const STARTERS = {
+  fullbody: { label: "Full body · 2 dagen", text: "Kracht en spiermassa met 2 trainingen per week. Sets bouwen op van 3 naar 4.", make: () => fullBodyProgram() },
+  billen: { label: "Billen & benen · 3 dagen", text: "2 dagen billen en benen, 1 dag bovenlichaam. Uit te bouwen naar 4.", make: () => starterProgram() },
+  ppl: { label: "Push / pull / legs · 6 dagen", text: "Voor gevorderden: elke spier 2× per week, met RIR, supersets en dropsets.", make: () => pplProgram() },
+};
 
 /**
  * Glutes and legs twice a week, upper body once [1, 2]. Glutes get direct work on both lower days
@@ -105,8 +152,8 @@ export function fourthDay() {
   ] };
 }
 
-export function emptyData() {
-  return { version: 1, program: starterProgram(), sessions: [], weights: [], draft: null, customExercises: [], feedback: [], weekPlans: [], savedPrograms: [], genAnswers: null, settings: { restTimer: false } };
+export function emptyData(program = starterProgram()) {
+  return { version: 1, program, sessions: [], weights: [], draft: null, customExercises: [], feedback: [], weekPlans: [], savedPrograms: [], genAnswers: null, settings: { restTimer: false } };
 }
 
 // ---------- lookups ----------
@@ -235,17 +282,43 @@ export function suggestion(d, e) {
 /** Working sets prefilled from the suggestion, then drop sets about 20% lighter each, rounded to the weight step. */
 export function draftSets(d, e, count, drops = 0) {
   const s = suggestion(d, e);
-  const out = Array.from({ length: count }, (_, i) => ({ kg: s.kg != null ? fmt(s.kg) : "", reps: "", goal: s.reps[i] ?? null, done: false, pr: false, rir: null, drop: false }));
+  // With "vorige keer vooraf invullen" off, the coach's weight is only a placeholder hint.
+  const pre = d.profile?.prefill !== false;
+  const kgText = s.kg != null ? fmt(s.kg) : "";
+  const out = Array.from({ length: count }, (_, i) => ({ kg: pre ? kgText : "", hint: kgText, reps: "", goal: s.reps[i] ?? null, done: false, pr: false, rir: null, drop: false }));
   let kg = s.kg ?? 0;
   for (let i = 0; i < drops; i++) {
     kg = kg > 0 ? Math.round((kg * 0.8) / e.inc) * e.inc : 0;
-    out.push({ kg: kg > 0 ? fmt(round1(kg)) : "", reps: "", goal: null, done: false, pr: false, rir: null, drop: true });
+    const t = kg > 0 ? fmt(round1(kg)) : "";
+    out.push({ kg: pre ? t : "", hint: t, reps: "", goal: null, done: false, pr: false, rir: null, drop: true });
   }
   return out;
 }
 
+/**
+ * Sets build up over the cycle when the program asks for it (Fitman): 3 sets in weeks 1–4, a fourth
+ * set on the first three exercises in weeks 5–8, and 4 sets on everything from week 9.
+ */
+export function setsFor(e, slot, week, buildUp) {
+  if (!buildUp) return e.sets;
+  return week <= 4 ? 3 : week <= 8 ? (slot < 3 ? 4 : 3) : 4;
+}
+export function buildUpText(week) {
+  if (week <= 4) return "Week 1–4: 3 sets per oefening. Vanaf week 5 komt er een vierde set bij op je eerste drie oefeningen.";
+  if (week <= 8) return "Week 5–8: 4 sets op je eerste drie oefeningen, 3 op de rest. Vanaf week 9 overal 4 sets.";
+  return "Week 9–12: 4 sets op elke oefening.";
+}
+/** A day with the sets of this week filled in, so every screen shows the same numbers. */
+export function dayForWeek(d, day, week = currentWeek(d)) {
+  if (!d.program.buildUp || !day) return day;
+  const inProgram = d.program.days.some((x) => x.id === day.id);
+  if (!inProgram) return day;
+  return { ...day, exercises: day.exercises.map((e, i) => ({ ...e, sets: setsFor(e, i, week, true) })) };
+}
+export const findDayNow = (d, id) => dayForWeek(d, findDay(d, id));
+
 export function freshDraft(d, dayId) {
-  const day = findDay(d, dayId) || d.program.days[0];
+  const day = dayForWeek(d, findDay(d, dayId) || d.program.days[0]);
   const items = {};
   for (const e of day.exercises) items[e.id] = draftSets(d, e, e.sets, e.dropSets);
   return { date: today(), dayId: day.id, items, swaps: {} };
@@ -253,7 +326,7 @@ export function freshDraft(d, dayId) {
 
 /** Keeps today's draft in step with a schema edited in the meantime; finished sets are never thrown away. */
 export function reconcile(d, draft) {
-  const day = findDay(d, draft.dayId);
+  const day = findDayNow(d, draft.dayId);
   if (!day) return freshDraft(d, nextDayId(d));
   let changed = false;
   const items = { ...draft.items };
@@ -297,9 +370,9 @@ export function estimatedMinutes(day) {
 }
 
 /** Direct sets count 1, assisting sets 0.5, summed over the week. */
-export function muscleSets(program) {
+export function muscleSets(program, week = 12) {
   const out = {};
-  for (const day of program.days) for (const e of day.exercises) for (const [m, f] of Object.entries(e.muscles || {})) out[m] = (out[m] || 0) + f * e.sets;
+  for (const day of program.days) day.exercises.forEach((e, i) => { for (const [m, f] of Object.entries(e.muscles || {})) out[m] = (out[m] || 0) + f * setsFor(e, i, week, program.buildUp); });
   return out;
 }
 
@@ -373,6 +446,10 @@ export function backToThree(p) {
   return { ...p, days: p.days.filter((x) => x.id !== FOURTH_DAY_ID), weeklyTarget: 3 };
 }
 export const hasFourthDay = (p) => p.days.some((x) => x.id === FOURTH_DAY_ID);
+/** The 3-to-4 day step only fits the glutes & legs starter (days w1–w3). */
+export const canGrowToFour = (p) => hasFourthDay(p) || ["w1", "w2", "w3"].every((id) => p.days.some((x) => x.id === id));
+/** Glutes are a focus when they get at least 12 weekly sets: then the coach talks about them. */
+export const isGluteFocus = (p) => (muscleSets(p).bilspieren || 0) >= 12;
 
 // ---------- personal coach notes from her own data ----------
 /**
@@ -381,7 +458,8 @@ export const hasFourthDay = (p) => p.days.some((x) => x.id === FOURTH_DAY_ID);
  */
 export function coachNudges(d) {
   const out = [];
-  const glute = muscleSets(d.program).bilspieren || 0;
+  const glute = muscleSets(d.program, currentWeek(d)).bilspieren || 0;
+  const gluteFocus = isGluteFocus(d.program);
 
   for (const e of allExercises(d)) {
     const series = d.sessions
@@ -403,11 +481,11 @@ export function coachNudges(d) {
     });
   }
 
-  if (glute < 10) out.push({ tag: "Billen", text: `Je schema geeft je bilspieren nu ${fmt(glute)} sets per week. Voor jouw doel is 12–20 een goede werkrange [4, 5]: voeg een hip thrust, abductie of kickback toe in Schema.` });
-  else if (glute > 26) out.push({ tag: "Billen", text: `Je bilspieren krijgen ${fmt(glute)} sets per week. Dat kan werken, maar de meeropbrengst per extra set wordt kleiner [4, 5]. Herstel je niet goed of stokt je progressie, haal er dan eerst sets af.` });
+  if (gluteFocus && glute < 10) out.push({ tag: "Billen", text: `Je schema geeft je bilspieren nu ${fmt(glute)} sets per week. Voor jouw doel is 12–20 een goede werkrange [4, 5]: voeg een hip thrust, abductie of kickback toe in Schema.` });
+  else if (gluteFocus && glute > 26) out.push({ tag: "Billen", text: `Je bilspieren krijgen ${fmt(glute)} sets per week. Dat kan werken, maar de meeropbrengst per extra set wordt kleiner [4, 5]. Herstel je niet goed of stokt je progressie, haal er dan eerst sets af.` });
 
   const cw = consistentWeeks(d, 3);
-  if (!hasFourthDay(d.program) && cw >= READY_WEEKS) out.push({ tag: "Klaar voor meer", text: `Je haalt al ${cw} weken op rij al je trainingen. Je bent klaar om naar 4 dagen te gaan: zie hieronder.` });
+  if (canGrowToFour(d.program) && !hasFourthDay(d.program) && cw >= READY_WEEKS) out.push({ tag: "Klaar voor meer", text: `Je haalt al ${cw} weken op rij al je trainingen. Je bent klaar om naar 4 dagen te gaan: zie hieronder.` });
   return out.slice(0, 4);
 }
 

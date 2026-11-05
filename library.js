@@ -1,4 +1,4 @@
-// Generated from the Android Library.kt and Sources.kt, so the Fitman apps share one exercise library.
+// The shared exercise library and sources of Fitman (first generated from the Android Library.kt and Sources.kt).
 // Tip sources are numbers into SOURCES (1-based); an empty list means a practical coaching cue.
 export const LIBRARY = [
   {"id": "incline-db-press", "name": "Incline DB press", "cue": "", "sets": 4, "repMin": 6, "repMax": 8, "inc": 2.0, "bodyweight": false, "muscles": {"borst": 1.0, "schouders-voor": 0.5, "triceps": 0.5}, "rest": 150, "tip": "Zet de bank op 30–45°: daar werkt het bovenste deel van je borst het hardst. Laat de dumbbells zakken tot je een stevige rek in je borst voelt.", "src": [21, 19]},
@@ -91,5 +91,6 @@ export const SOURCES = [
   "Schoenfeld, Grgic, Van Every & Plotkin (2021). Loading recommendations for muscle strength, hypertrophy, and local endurance: a re-examination of the repetition continuum. Sports.",
   "Iversen et al. (2021). No time to lift? Designing time-efficient training programs for strength and hypertrophy. Sports Medicine.",
   "Krzysztofik et al. (2019). Maximizing muscle hypertrophy: a systematic review of advanced resistance training techniques and methods. International Journal of Environmental Research and Public Health.",
-  "Sødal et al. (2023). Effects of drop sets on skeletal muscle hypertrophy: a systematic review and meta-analysis. Sports Medicine - Open."
+  "Sødal et al. (2023). Effects of drop sets on skeletal muscle hypertrophy: a systematic review and meta-analysis. Sports Medicine - Open.",
+  "Iraki, Fitschen, Espinar & Helms (2019). Nutrition recommendations for bodybuilders in the off-season: a narrative review. Sports."
 ];
