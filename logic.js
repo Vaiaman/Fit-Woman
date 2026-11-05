@@ -301,7 +301,22 @@ export function draftSets(d, e, count, drops = 0) {
  */
 export function setsFor(e, slot, week, buildUp) {
   if (!buildUp) return e.sets;
-  return week <= 4 ? 3 : week <= 8 ? (slot < 3 ? 4 : 3) : 4;
+  // setsAdj is the user's own shift (e.g. -1 for 2 sets): the build-up keeps working on top of it.
+  const base = week <= 4 ? 3 : week <= 8 ? (slot < 3 ? 4 : 3) : 4;
+  return clampSets(base + (e.setsAdj || 0));
+}
+export const MAX_SETS = 8;
+export const clampSets = (n) => Math.min(MAX_SETS, Math.max(1, n));
+
+/** The exercise with one set more or less in the schema; with build-up on, it shifts setsAdj instead. */
+export function stepSets(program, dayId, exId, by, week) {
+  const day = program.days.find((x) => x.id === dayId);
+  const i = day ? day.exercises.findIndex((e) => e.id === exId) : -1;
+  return updateExercise(program, dayId, exId, (e) => {
+    if (!program.buildUp) return { ...e, sets: clampSets(e.sets + by) };
+    const cur = setsFor(e, i, week, true), next = clampSets(cur + by);
+    return { ...e, setsAdj: (e.setsAdj || 0) + next - cur };
+  });
 }
 export function buildUpText(week) {
   if (week <= 4) return "Week 1–4: 3 sets per oefening. Vanaf week 5 komt er een vierde set bij op je eerste drie oefeningen.";
@@ -324,6 +339,29 @@ export function freshDraft(d, dayId) {
   return { date: today(), dayId: day.id, items, swaps: {} };
 }
 
+/** Sets for this exercise today: the schema plus any set added or dropped during this workout only. */
+export const todaySets = (draft, slot) => clampSets(slot.sets + (draft.extra?.[slot.id] || 0));
+
+/** One set more or less today, without touching the schema. Done sets are never removed. */
+export function stepTodaySets(draft, slot, by) {
+  const list = [...(draft.items[slot.id] || [])];
+  const work = list.filter((s) => !s.drop);
+  const extra = { ...(draft.extra || {}) };
+  if (by > 0) {
+    if (work.length >= MAX_SETS) return draft;
+    const prev = work[work.length - 1];
+    const add = prev ? { ...prev, reps: "", done: false, pr: false, rir: null } : { kg: "", hint: "", reps: "", goal: null, done: false, pr: false, rir: null, drop: false };
+    list.splice(work.length, 0, add);
+  } else {
+    const last = work[work.length - 1];
+    if (work.length <= 1 || last.done) return draft;
+    list.splice(work.length - 1, 1);
+  }
+  extra[slot.id] = work.length + by - slot.sets;
+  if (!extra[slot.id]) delete extra[slot.id];
+  return { ...draft, extra, items: { ...draft.items, [slot.id]: list } };
+}
+
 /** Keeps today's draft in step with a schema edited in the meantime; finished sets are never thrown away. */
 export function reconcile(d, draft) {
   const day = findDayNow(d, draft.dayId);
@@ -332,9 +370,10 @@ export function reconcile(d, draft) {
   const items = { ...draft.items };
   for (const slot of day.exercises) {
     const cur = items[slot.id];
-    if (!cur || (!cur.some((s) => s.done) && (cur.filter((s) => !s.drop).length !== slot.sets || cur.filter((s) => s.drop).length !== slot.dropSets))) {
+    const want = todaySets(draft, slot);
+    if (!cur || (!cur.some((s) => s.done) && (cur.filter((s) => !s.drop).length !== want || cur.filter((s) => s.drop).length !== slot.dropSets))) {
       const e = (draft.swaps[slot.id] && exercise(d, draft.swaps[slot.id])) || slot;
-      items[slot.id] = draftSets(d, e, slot.sets, slot.dropSets);
+      items[slot.id] = draftSets(d, e, want, slot.dropSets);
       changed = true;
     }
   }

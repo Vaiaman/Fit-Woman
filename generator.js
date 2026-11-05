@@ -2,7 +2,7 @@
 // The same rules live in the Android apps (logic/Generator.kt), so the same answers give the
 // same schema everywhere. Numbers in [n] point into SOURCES in library.js.
 import { LIBRARY } from "./library.js";
-import { MUSCLES } from "./logic.js";
+import { MUSCLES, setsFor } from "./logic.js";
 
 export const GOALS = { spier: "Spiergroei", kracht: "Kracht", beide: "Kracht + spier", onderhoud: "Fit blijven (onderhoud)" };
 export const FOCUS = {
@@ -287,17 +287,19 @@ function summarize(program, a, targets, focus) {
 
 // ---------- sharing ----------
 const SHARE_PREFIX = "FITSCHEMA1:";
-const KEEP = ["id", "name", "cue", "sets", "repMin", "repMax", "inc", "bodyweight", "muscles", "rest", "rir", "dropSets", "supersetWithNext"];
+const KEEP = ["id", "name", "cue", "sets", "repMin", "repMax", "inc", "bodyweight", "muscles", "rest", "rir", "dropSets", "supersetWithNext", "setsAdj"];
 
 /** A schema as readable text plus a code another Fitman app can paste in. */
 export function shareTextOf(program) {
   const lines = [program.name, ""];
   for (const d of program.days) {
     lines.push(d.name.toUpperCase());
-    for (const e of d.exercises) lines.push(`- ${e.name}: ${e.sets} × ${e.bodyweight ? "AMRAP" : `${e.repMin}–${e.repMax}`}${e.rir != null ? `, ${e.rir} RIR` : ""}${e.dropSets ? `, +${e.dropSets} drop` : ""}${e.supersetWithNext ? " (superset met volgende)" : ""}`);
+    // With build-up on, the text shows the sets of week 1 → week 12.
+    const setsText = (e, i) => (program.buildUp ? `${setsFor(e, i, 1, true)}→${setsFor(e, i, 12, true)}` : e.sets);
+    d.exercises.forEach((e, i) => lines.push(`- ${e.name}: ${setsText(e, i)} × ${e.bodyweight ? "AMRAP" : `${e.repMin}–${e.repMax}`}${e.rir != null ? `, ${e.rir} RIR` : ""}${e.dropSets ? `, +${e.dropSets} drop` : ""}${e.supersetWithNext ? " (superset met volgende)" : ""}`));
     lines.push("");
   }
-  const slim = { name: program.name, weeklyTarget: program.weeklyTarget, days: program.days.map((d) => ({ id: d.id, name: d.name, exercises: d.exercises.map((e) => Object.fromEntries(KEEP.map((k) => [k, e[k]]))) })) };
+  const slim = { name: program.name, weeklyTarget: program.weeklyTarget, buildUp: !!program.buildUp || undefined, days: program.days.map((d) => ({ id: d.id, name: d.name, exercises: d.exercises.map((e) => Object.fromEntries(KEEP.map((k) => [k, e[k]]))) })) };
   const code = SHARE_PREFIX + btoa(unescape(encodeURIComponent(JSON.stringify(slim))));
   lines.push("Overnemen in Fitman of Fit Woman: kopieer de code hieronder en kies Schema > Mijn schema's > Code plakken.", "", code);
   return lines.join("\n");
@@ -312,10 +314,10 @@ export function parseShared(text) {
     if (!Array.isArray(p.days) || !p.days.length) return null;
     const lib = Object.fromEntries(LIBRARY.map((e) => [e.id, e]));
     return {
-      name: String(p.name || "Gedeeld schema").slice(0, 60), weeklyTarget: p.weeklyTarget ?? p.days.length, buildUp: false,
+      name: String(p.name || "Gedeeld schema").slice(0, 60), weeklyTarget: p.weeklyTarget ?? p.days.length, buildUp: !!p.buildUp,
       days: p.days.slice(0, 7).map((d, i) => ({
         id: String(d.id || "s" + i), name: String(d.name || `Dag ${i + 1}`).slice(0, 24),
-        exercises: (d.exercises || []).map((e) => ({ ...(lib[e.id] || {}), ...e, tip: e.tip || lib[e.id]?.tip || "", src: e.src?.length ? e.src : lib[e.id]?.src || [], cue: String(e.cue || "").slice(0, 60), rir: e.rir ?? null, dropSets: e.dropSets || 0, supersetWithNext: !!e.supersetWithNext })),
+        exercises: (d.exercises || []).map((e) => ({ ...(lib[e.id] || {}), ...e, tip: e.tip || lib[e.id]?.tip || "", src: e.src?.length ? e.src : lib[e.id]?.src || [], cue: String(e.cue || "").slice(0, 60), rir: e.rir ?? null, dropSets: e.dropSets || 0, supersetWithNext: !!e.supersetWithNext, sets: Math.min(8, Math.max(1, +e.sets || 3)), setsAdj: Math.max(-3, Math.min(5, +e.setsAdj || 0)) })),
       })),
     };
   } catch { return null; }
