@@ -1,25 +1,42 @@
-# Fit Woman
+# Fitman (web-app)
 
-Web-app voor de iPhone (Safari, "Zet op beginscherm"), gebouwd op de functies van Fitman Max: eigen schema, RIR per set, supersets, dropsets, dubbele progressie en een coach. Focus op billen en benen, 3 dagen per week, met een knop om uit te bouwen naar 4.
+Eén app voor Fitman, Fitman Max en Fit Woman. Werkt op de iPhone (Safari, "Zet op beginscherm"), op Android in de browser, en binnen de Android-app Fitman, die dezelfde pagina laadt en er Samsung Health (Health Connect) aan toevoegt.
 
 Geen build-stap: gewone HTML, CSS en JavaScript-modules. Alle gegevens staan in `localStorage` op de telefoon; er gaat niets naar een server.
 
+## Indeling
+
+Vier tabs plus instellingen achter het tandwiel:
+
+| Tab | Wat |
+|---|---|
+| Training | de training van vandaag, sets loggen, rusttimer, weegkaart op weegdag |
+| Schema | Huidig · Mijn schema's · Nieuw schema (vragenlijst) |
+| Voortgang | Training (weken op schema, records, per oefening) en Lichaam (gewicht, stappen, omtrek) |
+| Coach | advies, Plan je week, cyclus, kennis |
+| Instellingen | kleurenpalet (groen, blauw, wit, roze), rusttimer, RIR, supersets/dropsets, weegdag, omtrekmaten, back-up, feedback, bronnen |
+
+Wat vroeger een aparte app was, is nu een startschema plus instellingen: Full body 2 dagen (Fitman), Billen & benen 3 dagen (Fit Woman) en Push/pull/legs 6 dagen (Fitman Max).
+
+## Bestanden
+
 | Bestand | Wat |
 |---|---|
-| `index.html`, `style.css` | pagina en roze/paars thema (contrast WCAG AA op de donkere achtergrond) |
-| `logic.js` | trainingslogica, overgezet uit de Kotlin-code van Fitman Max, plus startschema en coachtips |
-| `library.js` | oefeningen en bronnen, gegenereerd uit `Library.kt` en `Sources.kt` |
-| `app.js` | de vijf schermen: Training, Schema, Progressie, Lichaam, Coach |
+| `index.html`, `style.css` | pagina en de vier kleurenpaletten (contrast WCAG AA) |
+| `logic.js` | trainingslogica (overgezet uit de Kotlin-code), startschema's, set-opbouw, weekplanner, coachtips |
+| `generator.js` | schemagenerator achter de vragenlijst |
+| `library.js` | oefeningen en bronnen |
+| `app.js` | schermen, instellingen, back-up en de koppeling met de Android-app |
 | `sw.js`, `manifest.webmanifest`, `icons/` | offline werken en het beginscherm-icoon |
 
-## Startschema
+## Gegevens overzetten
 
-- **Billen & benen A**: hip thrust, squat, seated leg curl, hip abduction (+ dropset), calf raise
-- **Bovenlichaam**: lat pulldown, incline DB press, cable row, lateral raise, curl + triceps (superset)
-- **Billen & benen B**: Romanian deadlift, Bulgarian split squat, leg press, 45° back extension, cable kickback
-- **4e dag (optioneel)**: bovenlichaam + billen, lichter en met meer reps
+- **Fit Woman**: staat op hetzelfde adres. Bij de eerste start leest Fitman `fitwoman.v1` en bewaart alles onder `fitman.v1` (de oude sleutel blijft staan als reserve). Thema roze, RIR en supersets aan.
+- **Oude Android-app (Fitman en Fitman Max)**: de nieuwe Android-app geeft het oude gegevensbestand door; het welkomstscherm biedt "Overzetten" aan. Een back-up uit de oude app kan ook via Instellingen › Terugzetten.
 
-Ongeveer 20 sets per week voor de bilspieren (direct 1, meehelpend 0,5).
+## Koppeling met de Android-app
+
+De Android-app zet `window.FitmanAndroid` klaar met `legacyData()`, `flavor()`, `healthStatus()`, `readHealth(dagen)`, `requestHealth()`, `keepScreenOn(aan)`, `vibrate(json)`, `setTheme(kleur, licht)`, `shareText(titel, tekst)` en `saveFile(naam, tekst)`. Antwoorden van Health Connect komen binnen via `window.onFitmanHealth(json)`.
 
 ## Lokaal draaien
 
