@@ -1,6 +1,6 @@
 // Offline support: the app shell is cached, so Fitman opens in a gym without signal.
 // Bump CACHE when any file changes; the new version is used the next time the app opens.
-const CACHE = "fitman-v4";
+const CACHE = "fitman-v5";
 const FILES = ["./", "index.html", "style.css", "app.js", "logic.js", "generator.js", "library.js", "manifest.webmanifest", "icons/icon.svg", "icons/apple-touch-icon.png", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {

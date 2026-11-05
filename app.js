@@ -764,7 +764,7 @@ function renderCoach() {
         <button class="btn ${ready ? "primary" : "outline"}" data-a="toFour">${ready ? "Voeg de 4e dag toe" : "Toch nu al toevoegen"}</button>`;
     h += `</section>`;
   }
-  const topics = COACH.map((t, i) => [...t, i]).filter(([, , tag]) => !tag || (tag === "glute" && gluteFocus()) || (tag === "female" && P().femaleTopics));
+  const topics = COACH.map(([t, x, tag], i) => [t, x, tag, i]).filter(([, , tag]) => !tag || (tag === "glute" && gluteFocus()) || (tag === "female" && P().femaleTopics));
   h += `<section class="card" style="gap:0"><h3 style="margin-bottom:4px">Kennis van je coach</h3>${topics.map(([t, x, , i]) => `<div class="topic"><button data-a="topic" data-i="${i}" aria-expanded="${ui.topic === i}"><span class="grow">${t}</span>${svg(ui.topic === i ? "up" : "down")}</button>${ui.topic === i ? `<p class="small">${x}</p>` : ""}</div>`).join("")}</section>`;
   return h;
 }
@@ -1201,6 +1201,15 @@ for (const k of Object.keys(clampEx)) actions[k] = (t) => editProgram((p) => L.u
 
 // A new day: today's draft may be stale.
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { if (data) refreshHealth(); render(); } else syncWake(); });
+
+/** Android back button: close a sheet, leave settings, go back to Training; false lets the app close. */
+window.fitmanBack = () => {
+  if (ui.sheet) { closeSheet(); return true; }
+  if (!data) return false;
+  if (ui.tab === "settings") { ui.tab = ui.prevTab || "training"; render(); return true; }
+  if (ui.tab !== "training") { ui.tab = "training"; render(); return true; }
+  return false;
+};
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
 if (data) refreshHealth();
