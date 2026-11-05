@@ -50,20 +50,29 @@ const DAY_MUSCLES = {
 /** What each exercise needs. Anything not listed needs a full gym. */
 const EQUIP = {
   dumbbell: ["incline-db-press", "flat-db-press", "one-arm-db-row", "shoulder-press-db", "db-lateral-raise", "incline-db-curl", "hammer-curl",
-    "bulgarian-split-squat", "walking-lunge", "romanian-deadlift", "hip-thrust", "overhead-triceps-extension", "standing-calf-raise"],
+    "bulgarian-split-squat", "walking-lunge", "romanian-deadlift", "hip-thrust", "overhead-triceps-extension", "standing-calf-raise",
+    "goblet-squat", "reverse-lunge", "step-up", "glute-bridge"],
   cable: ["cable-fly", "lat-pulldown", "seated-cable-row", "single-arm-cable-row", "cable-lateral-raise", "facepulls", "rear-delt-cable-fly",
-    "triceps-pushdown", "cable-kickback", "cable-crunch"],
-  bar: ["pull-ups", "dips", "hanging-leg-raise"],
+    "triceps-pushdown", "cable-kickback", "cable-crunch", "straight-arm-pulldown", "overhead-cable-triceps", "bayesian-curl"],
+  bar: ["pull-ups", "dips", "hanging-leg-raise", "inverted-row"],
+  body: ["push-up", "nordic-curl", "ab-wheel", "crunch"],
 };
-const PLACE_ALLOWS = { gym: null, klein: ["dumbbell", "cable", "bar"], thuis: ["dumbbell"] };
+const PLACE_ALLOWS = { gym: null, klein: ["dumbbell", "cable", "bar", "body"], thuis: ["dumbbell", "body"] };
+/** Home and bodyweight options: second choice in a full gym, so a gym schema keeps its loadable lifts. */
+const HOME = ["push-up", "inverted-row", "goblet-squat", "glute-bridge"];
+/** In the library to pick by hand, never chosen by the generator: needs coaching or a slow build-up. */
+const MANUAL = ["nordic-curl"];
+/** Near-identical movements: one per day is enough, so a second one from the same family scores lower. */
+const FAMILY = [["walking-lunge", "reverse-lunge", "bulgarian-split-squat", "step-up"], ["hip-thrust", "hip-thrust-machine", "glute-bridge"]];
+const sameFamily = (x, y) => FAMILY.some((f) => f.includes(x) && f.includes(y));
 
 /** Exercises left out for a complaint; a gentler option for the same muscle is picked instead. */
 const AVOID = {
   onderrug: ["barbell-squat", "deadlift", "barbell-row", "romanian-deadlift", "overhead-press", "smith-squat"],
-  knie: ["barbell-squat", "hack-squat", "smith-squat", "bulgarian-split-squat", "walking-lunge", "leg-extension"],
+  knie: ["barbell-squat", "hack-squat", "smith-squat", "bulgarian-split-squat", "walking-lunge", "leg-extension", "goblet-squat", "reverse-lunge", "step-up"],
   schouder: ["barbell-bench-press", "dips", "overhead-press", "smith-shoulder-press", "shoulder-press-db"],
   elleboog: ["skull-crusher", "barbell-curl", "preacher-curl", "dips"],
-  heup: ["deadlift", "bulgarian-split-squat", "walking-lunge"],
+  heup: ["deadlift", "bulgarian-split-squat", "walking-lunge", "reverse-lunge", "step-up"],
 };
 
 /** Heavy on the whole body and slow to recover from; only first choice when strength is the goal. */
@@ -128,7 +137,7 @@ function pool(a) {
   const allowed = PLACE_ALLOWS[a.place];
   const avoid = new Set(a.injuries.flatMap((i) => AVOID[i] || []));
   const dislikes = new Set(a.dislikes);
-  return LIBRARY.filter((e) => !dislikes.has(e.id) && !avoid.has(e.id) && (!allowed || allowed.includes(equipOf(e.id))));
+  return LIBRARY.filter((e) => !MANUAL.includes(e.id) && !dislikes.has(e.id) && !avoid.has(e.id) && (!allowed || allowed.includes(equipOf(e.id))));
 }
 
 /** Reps, rest and RIR from goal and preferences [3, 6, 7, 8]. */
@@ -172,6 +181,8 @@ function buildDay(type, share, ctx, a, usedElsewhere) {
       if (!hit.has(m)) s += isCompound(e) ? 12 : 0; else s += isCompound(e) ? 0 : 6;
       if (usedElsewhere.has(e.id)) s -= 15;
       if (TIRING.includes(e.id) && a.goal !== "kracht") s -= 10;
+      if (HOME.includes(e.id) && a.place === "gym") s -= 8;
+      if (picked.some((p) => sameFamily(p.base.id, e.id))) s -= 12;
       if ((a.goal === "kracht" || a.goal === "beide") && STRONG.includes(e.id)) s += 8;
       for (const [k, w] of Object.entries(e.muscles)) if (k !== m && need[k] > 0) s += Math.min(need[k], 4) * w;
       return s;

@@ -254,3 +254,28 @@ nav.tabs button.on svg { background: var(--primary); color: #fff; }
 .build { opacity: 0; animation: buildIn .3s ease forwards; }
 @keyframes buildIn { to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .build { animation: none; opacity: 1; } }
+
+/* Exercise info sheet: own pictogram drawings in the palette colours (exviz.js) */
+.pickrow { display: flex; align-items: center; gap: 8px; min-height: 44px; text-align: left; }
+.viz { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 6px; }
+.exviz { display: block; width: 100%; max-height: 240px; }
+.exviz line, .exviz polyline, .exviz path { stroke-linecap: round; stroke-linejoin: round; fill: none; }
+.exviz .lb { stroke: var(--text); stroke-width: 6; }
+.exviz .tr { stroke: var(--text); stroke-width: 9; }
+.exviz .nk { stroke-width: 4; }
+.exviz .ft { stroke-width: 5; }
+.exviz .hd { fill: var(--text); }
+.exviz .body { fill: var(--text); stroke: var(--text); stroke-width: 2; }
+.exviz .far { stroke: var(--muted); stroke-width: 5.5; opacity: .55; }
+.exviz .eq { stroke: var(--line); }
+.exviz .eqf { fill: var(--ph); }
+.exviz .padm { stroke: var(--ph); stroke-width: 5; }
+.exviz .floor { stroke: var(--line); stroke-width: 2; }
+.exviz .load { fill: var(--accent); }
+.exviz .load.bb, .exviz .load.plate { fill: none; stroke: var(--accent); stroke-width: 3.5; }
+.exviz .cable { stroke: var(--accent); stroke-width: 1.2; opacity: .8; }
+.exviz .cap { fill: var(--muted); font-size: 8px; font-weight: 600; }
+.pill.soft { background: var(--surface); color: var(--muted); border: 1px solid var(--line); }
+.steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 4px; font-size: 15px; line-height: 21px; }
+.warnbox { border-left: 3px solid var(--warn); background: var(--surface); border-radius: 8px; padding: 8px 10px; font-size: 14px; line-height: 20px; }
+.warnbox b { color: var(--warn); margin-right: 4px; }

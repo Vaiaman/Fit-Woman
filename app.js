@@ -4,11 +4,12 @@
 import { LIBRARY, SOURCES } from "./library.js";
 import * as L from "./logic.js";
 import * as G from "./generator.js";
+import { exerciseSvg, hasDrawing } from "./exviz.js";
 
 const KEY = "fitman.v1";
 /** Fit Woman stored its data under this key on the same address; it is read once and left in place as a backup. */
 const LEGACY = "fitwoman.v1";
-const VERSION = "2.0";
+const VERSION = "2.1";
 const A = window.FitmanAndroid || null;
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -99,6 +100,8 @@ const I = {
   up: '<path d="m6 15 6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
   down: '<path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
 };
+I.close = '<path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>';
+I.info = '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11v6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="7.6" r="1.3" fill="currentColor"/>';
 const svg = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${I[name]}</svg>`;
 
 // Four tabs within the 3–5 that a bottom bar is made for (Material 3); settings sit behind the gear.
@@ -205,6 +208,7 @@ function renderTraining() {
           <h3>${esc(e.name)}${gPill(e)}</h3>
           ${sub ? `<div class="small ${e.id !== slot.id ? "accent" : "muted"}">${sub}</div>` : ""}
         </button>
+        ${infoBtn(e)}
         <button class="iconbtn" data-a="shuffle" data-id="${slot.id}" ${sets.some((s) => s.done) ? "disabled" : ""} aria-label="Andere oefening voor dezelfde spier">${svg("shuffle")}</button>
         <div class="meta"><b>${sets.filter((s) => !s.drop).length} × ${e.bodyweight ? "AMRAP" : `${e.repMin}–${e.repMax}`}</b><span class="small" style="color:${done === sets.length && sets.length ? "var(--done)" : "var(--muted)"}">${done}/${sets.length} sets</span></div>
       </div>
@@ -377,7 +381,7 @@ function renderCurrentSchema() {
         + ((tech || e.supersetWithNext) && i < day.exercises.length - 1 ? toggle(`Superset met ${esc(day.exercises[i + 1].name)}`, e.supersetWithNext, "exSuper", x) : "")
         + `<input class="text" data-in="cue" ${x} value="${esc(e.cue)}" placeholder="Notitie, bijvoorbeeld stoelstand 4" maxlength="60">
         <div class="row"><button class="iconbtn" data-a="exMove" data-by="-1" ${x} aria-label="Omhoog">${svg("up")}</button><button class="iconbtn" data-a="exMove" data-by="1" ${x} aria-label="Omlaag">${svg("down")}</button>
-        <span class="grow"></span><button class="link" data-a="exReplace" ${x}>Vervangen</button><button class="link warn" data-a="exRemove" ${x}>Weg</button></div>`;
+        <span class="grow"></span>${L.libGet(e.id) ? `<button class="link" data-a="info" ${x}>Uitleg</button>` : ""}<button class="link" data-a="exReplace" ${x}>Vervangen</button><button class="link warn" data-a="exRemove" ${x}>Weg</button></div>`;
     }
     h += `</section>`;
   });
@@ -411,11 +415,38 @@ function pickerSheet(replaceId) {
     return `<h2>${replaceId ? "Vervang oefening" : "Oefening toevoegen"}</h2>
       <input class="text" data-in="pickQ" value="${esc(ui.pick.q)}" placeholder="Zoek, bijvoorbeeld thrust" autocomplete="off">
       <div class="chips"><button class="chip ${!ui.pick.muscle ? "on" : ""}" data-a="pickM" data-m="">Alles</button>${Object.entries(L.MUSCLES).map(([k, v]) => `<button class="chip ${ui.pick.muscle === k ? "on" : ""}" data-a="pickM" data-m="${k}">${v}</button>`).join("")}</div>
-      <div>${list.map((e) => `<button class="list-row" style="width:100%;text-align:left" data-a="pickEx" data-id="${e.id}"><span class="grow">${esc(e.name)}</span><span class="small muted">${L.MUSCLES[L.primaryMuscle(e)] || ""}</span></button>`).join("") || '<div class="empty">Niets gevonden. Maak hieronder je eigen oefening.</div>'}</div>
+      <div>${list.map((e) => `<div class="list-row"><button class="grow pickrow" data-a="pickEx" data-id="${e.id}"><span class="grow">${esc(e.name)}</span><span class="small muted">${L.MUSCLES[L.primaryMuscle(e)] || ""}</span></button>${infoBtn(e, "pick")}</div>`).join("") || '<div class="empty">Niets gevonden. Maak hieronder je eigen oefening.</div>'}</div>
       <h3>Eigen oefening</h3>
       <input class="text" id="newName" placeholder="Naam, bijvoorbeeld Glute ham raise" maxlength="40">
       <select class="text" id="newMuscle">${Object.entries(L.MUSCLES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
       <div class="actions"><button class="link muted" data-a="close">Annuleren</button><button class="btn primary" data-a="createEx">Maak en voeg toe</button></div>`;
+  });
+}
+
+// ---------- exercise info: drawing, three steps, the common mistake and the evidence ----------
+/** The i-button: only for library exercises, which have a drawing and an explanation. */
+const infoBtn = (e, from = "") => (L.libGet(e.id) ? `<button class="iconbtn" data-a="info" data-id="${e.id}" data-from="${from}" aria-label="Uitleg ${esc(e.name)}">${svg("info")}</button>` : "");
+const reduceMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+function infoSheet(id, from) {
+  const e = L.libGet(id);
+  if (!e) return;
+  const pickState = from === "pick" ? { ...ui.pick } : null;
+  openSheet(() => {
+    const ms = Object.entries(e.muscles).sort((a, b) => b[1] - a[1]);
+    const main = ms.filter(([, w]) => w >= 1).map(([m]) => L.MUSCLES[m] || m);
+    const help = ms.filter(([, w]) => w < 1).map(([m]) => L.MUSCLES[m] || m);
+    // Picture superiority: a moving figure is understood faster than a description; the text stays short (three steps).
+    let h = `<div class="row"><h2 class="grow" style="margin:0">${esc(e.name)}</h2><button class="iconbtn" data-a="close" aria-label="Sluiten">${svg("close")}</button></div>`;
+    if (hasDrawing(id)) h += `<div class="viz">${exerciseSvg(id, { animate: !reduceMotion() })}</div>`;
+    h += `<div class="chips wrap">${main.map((m) => `<span class="pill glute">${m}</span>`).join("")}${help.map((m) => `<span class="pill soft">${m}</span>`).join("")}</div>`;
+    if (help.length) h += `<p class="tiny muted" style="margin-top:-6px">Gekleurd: hoofdspier. Grijs: helpt mee.</p>`;
+    if (e.how?.length) h += `<h3 style="margin:0">Zo doe je het</h3><ol class="steps">${e.how.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>`;
+    if (e.fout) h += `<div class="warnbox"><b>Let op</b> ${esc(e.fout)}</div>`;
+    if (e.tip) h += `<div class="tip"><b>Waarom deze oefening</b><br>${esc(e.tip)}<div class="tiny">${srcText(e.src)}</div></div>`;
+    if (pickState) h += `<div class="actions"><button class="link muted" data-a="infoBack">Terug naar de lijst</button><button class="btn primary" data-a="infoPick" data-id="${id}">${pickState.replaceId ? "Vervang hiermee" : "Voeg toe"}</button></div>`;
+    else h += `<div class="actions"><button class="btn primary" data-a="close">Sluiten</button></div>`;
+    return h;
   });
 }
 
@@ -484,7 +515,7 @@ function renderGenerator() {
         if (!list.length) return "";
         return `<div class="label accent" style="margin-top:8px">${label}</div>` + list.map((e) => {
           const st = a.likes.includes(e.id) ? 1 : a.dislikes.includes(e.id) ? 2 : 0;
-          return `<button class="list-row" style="width:100%;text-align:left" data-a="gLike" data-id="${e.id}"><span class="grow">${esc(e.name)}</span><b class="small" style="color:${["var(--muted)", "var(--done)", "var(--warn, #E5935F)"][st]}">${["–", "Graag", "Liever niet"][st]}</b></button>`;
+          return `<div class="list-row"><button class="grow pickrow" data-a="gLike" data-id="${e.id}"><span class="grow">${esc(e.name)}</span><b class="small" style="color:${["var(--muted)", "var(--done)", "var(--warn, #E5935F)"][st]}">${["–", "Graag", "Liever niet"][st]}</b></button>${infoBtn(e, "gen")}</div>`;
         }).join("");
       }).join("");
       h += `<div class="row" style="margin-bottom:12px"><button class="btn outline grow" data-a="gBack">Terug</button><button class="btn primary grow" style="flex:2" data-a="gNext">${a.likes.length || a.dislikes.length ? "Volgende" : "Overslaan"}</button></div>`;
@@ -1102,6 +1133,9 @@ const actions = {
   addEx: () => pickerSheet(null),
   pickM: (t) => { ui.pick.muscle = t.dataset.m; renderSheet(); },
   pickEx: (t) => placeExercise(L.exercise(data, t.dataset.id)),
+  info: (t) => infoSheet(t.dataset.id, t.dataset.from || ""),
+  infoBack: () => { const p = ui.pick; pickerSheet(p.replaceId); Object.assign(ui.pick, { q: p.q, muscle: p.muscle }); renderSheet(); },
+  infoPick: (t) => placeExercise(L.exercise(data, t.dataset.id)),
   createEx: () => {
     const name = $("#newName").value.trim();
     if (!name) return toast("Geef je oefening een naam");
