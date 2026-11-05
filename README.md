@@ -25,7 +25,8 @@ Wat vroeger een aparte app was, is nu een startschema plus instellingen: Full bo
 | `index.html`, `style.css` | pagina en de vier kleurenpaletten (contrast WCAG AA) |
 | `logic.js` | trainingslogica (overgezet uit de Kotlin-code), startschema's, set-opbouw, weekplanner, coachtips |
 | `generator.js` | schemagenerator achter de vragenlijst |
-| `library.js` | oefeningen en bronnen |
+| `library.js` | oefeningen (met uitleg in 3 stappen en de meest gemaakte fout) en bronnen |
+| `exviz.js`, `poses.js` | eigen animaties per oefening (SVG-pictogrammen uit gewrichtshoeken, vrij te delen) |
 | `app.js` | schermen, instellingen, back-up en de koppeling met de Android-app |
 | `sw.js`, `manifest.webmanifest`, `icons/` | offline werken en het beginscherm-icoon |
 
