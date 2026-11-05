@@ -4,7 +4,7 @@ import { LIBRARY, SOURCES } from "./library.js";
 import * as L from "./logic.js";
 
 const KEY = "fitwoman.v1";
-const VERSION = "1.0";
+const VERSION = "1.1";
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -13,14 +13,17 @@ function load() {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return L.emptyData();
-    return { ...L.emptyData(), ...JSON.parse(raw) };
+    const d = { ...L.emptyData(), ...JSON.parse(raw) };
+    d.weekPlans = d.weekPlans || [];
+    d.settings = { restTimer: false, ...(d.settings || {}) };
+    return d;
   } catch (e) {
     localStorage.setItem(KEY + ".unreadable." + Date.now(), localStorage.getItem(KEY) || "");
     return L.emptyData();
   }
 }
 let data = load();
-const ui = { tab: "training", openEx: null, schemaDay: null, schemaEx: null, progressEx: null, sheet: null, restEnds: 0, restTotal: 0 };
+const ui = { tab: "training", openEx: null, schemaDay: null, schemaEx: null, progressEx: null, sheet: null, restStart: 0, restAdvice: 0, plan: null };
 
 function save() { localStorage.setItem(KEY, JSON.stringify(data)); }
 function update(f) { data = f(data); save(); render(); }
@@ -90,10 +93,15 @@ function currentDraft() {
 
 function renderTraining() {
   const dr = currentDraft();
-  const day = data.program.days.find((x) => x.id === dr.dayId);
+  const day = L.findDay(data, dr.dayId);
   const w = L.currentWeek(data);
-  const target = L.weeklyTarget(data);
-  const thisWeek = L.weekStats(data)[Math.min(w, 12) - 1]?.sessions ?? 0;
+  const monday = L.mondayOf(L.today());
+  const plan = L.currentPlan(data);
+  const target = L.targetForWeek(data, monday);
+  const thisWeek = data.sessions.filter((s) => s.date >= monday).length;
+  const toggles = plan
+    ? plan.slots.map((x) => ({ id: x.dayId, label: `${L.dayShort(x.date)} · ${L.findDay(data, x.dayId)?.name || ""}` }))
+    : data.program.days.map((x) => ({ id: x.id, label: x.name }));
   const groups = L.supersetLabels(day.exercises);
   const open = ui.openEx ?? day.exercises.find((e) => dr.items[e.id]?.some((s) => !s.done))?.id;
   const all = Object.values(dr.items).flat();
@@ -103,7 +111,8 @@ function renderTraining() {
     <div class="end"><button class="link" data-a="feedback">Feedback geven</button><div class="small muted">${w > 12 ? "Cyclus afgerond" : `Week ${w} van 12`}</div></div></div>
     <div class="cyclebar" aria-label="Cyclus"><div style="width:${Math.min(100, (L.inCycle(data).length / L.cycleSessions(data)) * 100)}%"></div></div>
     <div class="row small"><span class="muted grow">Deze week</span><span class="weekdots">${Array.from({ length: target }, (_, i) => `<i class="${i < thisWeek ? "on" : ""}"></i>`).join("")}</span><span>${Math.min(thisWeek, target)}/${target}</span></div>
-    <div class="seg" role="tablist">${data.program.days.map((d) => `<button class="${d.id === dr.dayId ? "on" : ""}" data-a="day" data-id="${d.id}">${esc(d.name)}</button>`).join("")}</div>
+    ${plan ? `<p class="small accent">Je weekplanning staat aan. Aanpassen of wissen doe je in Coach.</p>` : ""}
+    <div class="seg" role="tablist">${toggles.map((t) => `<button class="${t.id === dr.dayId ? "on" : ""}" data-a="day" data-id="${t.id}">${esc(t.label)}</button>`).join("")}</div>
     <p class="small muted">Geschatte duur ± ${L.estimatedMinutes(day)} min, inclusief rust en warming-up.</p>`;
 
   if (!day.exercises.length) h += `<div class="empty">${esc(day.name)} heeft nog geen oefeningen. Voeg ze toe in Schema.</div>`;
@@ -165,7 +174,7 @@ function editSet(exId, i, f) {
 
 function markDone(slotId, i, idx) {
   const dr = currentDraft();
-  const day = data.program.days.find((x) => x.id === dr.dayId);
+  const day = L.findDay(data, dr.dayId);
   const slot = day.exercises[idx];
   const e = (dr.swaps[slotId] && L.exercise(data, dr.swaps[slotId])) || slot;
   const s = dr.items[slotId][i];
@@ -184,7 +193,7 @@ function markDone(slotId, i, idx) {
   if (items[slotId][i + 1]?.drop && !items[slotId][i + 1].done) { ui.openEx = slotId; return render(); }
   // Superset: go straight to the next exercise of the chain, rest only after the last one.
   const next = slot.supersetWithNext ? day.exercises[idx + 1] : null;
-  if (next && hasOpen(next.id)) { ui.restEnds = 0; ui.openEx = next.id; return render(); }
+  if (next && hasOpen(next.id)) { ui.restStart = 0; ui.openEx = next.id; return render(); }
   let start = idx;
   while (start > 0 && day.exercises[start - 1].supersetWithNext) start--;
   if (start < idx) ui.openEx = day.exercises.slice(start, idx + 1).find((c) => hasOpen(c.id))?.id ?? null;
@@ -195,7 +204,7 @@ function markDone(slotId, i, idx) {
 
 function finishTraining() {
   const dr = currentDraft();
-  const day = data.program.days.find((x) => x.id === dr.dayId);
+  const day = L.findDay(data, dr.dayId);
   const items = day.exercises.map((slot) => {
     const sets = (dr.items[slot.id] || []).filter((s) => s.done).map((s) => ({ kg: L.toKg(s.kg), reps: parseInt(s.reps, 10) || 0, rir: s.rir, drop: s.drop }));
     return sets.length ? { exId: dr.swaps[slot.id] || slot.id, sets } : null;
@@ -209,7 +218,7 @@ function finishTraining() {
   }).filter(Boolean);
   const vol = L.volume(session);
   const delta = prev ? Math.round((vol / L.volume(prev) - 1) * 100) : null;
-  ui.restEnds = 0;
+  ui.restStart = 0;
   ui.openEx = null;
   update((d) => ({ ...d, sessions: [...d.sessions, session], draft: null }));
   const n = L.inCycle(data).length;
@@ -225,31 +234,21 @@ function finishTraining() {
 }
 
 // ---------- rest timer ----------
-let audio;
-function beep() {
-  try {
-    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
-    const o = audio.createOscillator(), g = audio.createGain();
-    o.frequency.value = 880; g.gain.value = 0.15; o.connect(g); g.connect(audio.destination);
-    o.start(); o.stop(audio.currentTime + 0.35);
-  } catch (e) { /* sound is a bonus */ }
-  navigator.vibrate?.(400);
-}
+// No countdown and no sound (her feedback: a ticking clock is stressful). When she turns the
+// timer on in Coach, it counts up quietly and only shows the advised rest as a reference.
 function startRest(sec) {
-  // Create the audio context during a tap, so iOS allows the beep later.
-  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume?.(); } catch (e) {}
-  ui.restTotal = sec; ui.restEnds = Date.now() + sec * 1000;
+  if (!data.settings?.restTimer) return;
+  ui.restAdvice = sec; ui.restStart = Date.now();
 }
 function renderTimer() {
   const el = $("#timer");
-  const left = Math.ceil((ui.restEnds - Date.now()) / 1000);
-  if (!ui.restEnds) { el.hidden = true; $("main").classList.remove("timer-on"); return; }
-  if (left <= 0) { ui.restEnds = 0; beep(); toast("Rust voorbij: volgende set"); return renderTimer(); }
+  if (!ui.restStart) { el.hidden = true; $("main").classList.remove("timer-on"); return; }
+  const gone = Math.floor((Date.now() - ui.restStart) / 1000);
   el.hidden = false; $("main").classList.add("timer-on");
-  el.innerHTML = `<div class="grow"><div class="label muted">Rust</div><div class="bar"><div style="width:${(left / ui.restTotal) * 100}%"></div></div></div>
-    <b>${restText(left)}</b><button class="btn outline" data-a="rest30">+30 s</button><button class="link" data-a="restStop">Stop</button>`;
+  el.innerHTML = `<div class="grow"><div class="label muted">Rust</div><div class="small ${gone >= ui.restAdvice ? "accent" : "muted"}">${gone >= ui.restAdvice ? "Klaar wanneer jij bent" : `advies ${restText(ui.restAdvice)}`}</div></div>
+    <b>${restText(gone)}</b><button class="link" data-a="restStop">Verberg</button>`;
 }
-setInterval(() => { if (ui.restEnds) renderTimer(); }, 500);
+setInterval(() => { if (ui.restStart) renderTimer(); }, 1000);
 
 // ---------- Schema ----------
 function renderSchema() {
@@ -339,10 +338,10 @@ function renderProgress() {
   const ex = tracked.find((e) => e.id === ui.progressEx) || tracked[0];
   ui.progressEx = ex?.id;
   const series = ex ? L.exerciseSeries(data, ex) : [];
-  const max = Math.max(target, ...stats.map((s) => s.sessions));
+  const max = Math.max(target, ...stats.map((s) => Math.max(s.sessions, s.target)));
   let h = `<h2>Progressie</h2>
     <div class="tiles">
-      <div class="tile"><span class="label muted">Deze week</span><b>${stats[w - 1].sessions}/${target}</b><span class="small muted">trainingen</span></div>
+      <div class="tile"><span class="label muted">Deze week</span><b>${stats[w - 1].sessions}/${stats[w - 1].target}</b><span class="small muted">trainingen</span></div>
       <div class="tile"><span class="label muted">Reeks</span><b>${st.weeks}</b><span class="small muted">weken op schema${st.jokerUsed ? " · joker gebruikt" : ""}</span></div>
       <div class="tile"><span class="label muted">Records</span><b style="color:var(--record)">${L.recordCount(data)}</b><span class="small muted">deze cyclus</span></div>
       <div class="tile"><span class="label muted">Trainingen</span><b>${L.inCycle(data).length}</b><span class="small muted">van ${L.cycleSessions(data)}</span></div>
@@ -350,10 +349,10 @@ function renderProgress() {
     <section class="card"><h3>Weken op schema</h3>
       <svg class="chart" viewBox="0 0 320 120" role="img" aria-label="Trainingen per week">${stats.map((s, i) => {
         const bh = (s.sessions / max) * 90;
-        const on = s.sessions >= target;
+        const on = s.sessions >= s.target;
         return `<rect x="${i * 26 + 4}" y="${100 - bh}" width="20" height="${Math.max(bh, 2)}" rx="4" fill="${on ? "var(--done)" : s.week === w ? "var(--accent)" : "var(--line)"}"/><text x="${i * 26 + 14}" y="116" fill="var(--muted)" font-size="9" text-anchor="middle">${s.week}</text>`;
       }).join("")}<line x1="0" x2="320" y1="${100 - (target / max) * 90}" y2="${100 - (target / max) * 90}" stroke="var(--muted)" stroke-dasharray="4 4"/></svg>
-      <p class="small muted">Paars is een week waarin je je weekdoel haalde. Eén gemiste week per cyclus breekt je reeks niet.</p></section>`;
+      <p class="small muted">Paars is een week waarin je je weekdoel haalde (bij een aangepaste week: je planning). Eén gemiste week per cyclus breekt je reeks niet.</p></section>`;
   if (ex) h += `<section class="card"><h3>Per oefening</h3>
       <select class="text" data-in="progEx">${tracked.map((e) => `<option value="${e.id}" ${e.id === ex.id ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>
       ${series.length ? lineChart(series.map((p) => ({ v: p.value, record: p.record })), "var(--accent)") : '<div class="empty">Nog niet gelogd deze cyclus.</div>'}
@@ -409,6 +408,7 @@ function renderCoach() {
     ? nudges.map((n) => `<div class="stack" style="gap:2px"><span class="label" style="color:var(--done)">${n.tag}</span><p>${esc(n.text)}</p></div>`).join("")
     : `<p>${data.sessions.length ? "Alles loopt volgens plan. Blijf in elke training één rep of een paar kilo winnen; ik meld me hier zodra iets stil komt te staan." : "Log je eerste trainingen. Na een paar weken zie je hier persoonlijke tips: waar je stil staat, waar je zwaarder kunt en hoe je billenvolume ervoor staat."}</p>`}</section>`;
 
+  h += renderPlanner();
   h += `<section class="card"><h3>${four ? "Je traint 4 dagen per week" : "Uitbouwen naar 4 dagen"}</h3>`;
   if (four) h += `<p class="small">De vierde dag traint je bovenlichaam een tweede keer en je billen een derde keer, lichter en met meer reps. Wordt het te veel, dan kun je zonder schuldgevoel terug: consistent 3× is beter dan wisselend 4×.</p><button class="btn outline" data-a="toThree">Terug naar 3 dagen</button>`;
   else h += `<p class="small">Een vaste gewoonte heeft gemiddeld zo'n twee maanden nodig, met grote verschillen per persoon [30]. Daarom eerst 3 dagen vast, dan uitbreiden. Je bent er klaar voor als je ${L.READY_WEEKS} weken op rij al je 3 trainingen haalt.</p>
@@ -427,11 +427,51 @@ function renderCoach() {
   h += `<section class="card"><h3>Instellingen</h3>
     <div class="field"><span>Start cyclus</span><button data-a="startDate" data-by="-7" aria-label="Week eerder">−</button><b>${L.niceDate(data.program.startDate)}</b><button data-a="startDate" data-by="7" aria-label="Week later">+</button></div>
     <button class="link" data-a="newCycle" style="align-self:flex-start">Nieuwe cyclus starten vanaf deze week</button>
+    ${toggle("Rusttimer na elke set (telt rustig op, zonder geluid)", !!data.settings.restTimer, "restTimer")}
     <div class="row"><button class="btn outline grow" data-a="export">Back-up maken</button><button class="btn outline grow" data-a="import">Terugzetten</button></div>
     <p class="small muted">Je gegevens staan alleen op deze telefoon, in de app-opslag van Safari. Maak af en toe een back-up naar iCloud Drive of WhatsApp. Versie ${VERSION}.</p></section>
     <section class="card"><button class="row" data-a="toggleSrc" style="width:100%"><h3 class="grow" style="text-align:left">Bronnen (${SOURCES.length})</h3>${svg(ui.srcOpen ? "up" : "down").replace("<svg", '<svg width="22" height="22"')}</button>
     ${ui.srcOpen ? SOURCES.map((s, i) => `<div class="src"><b>[${i + 1}]</b><span>${esc(s)}</span></div>`).join("") : ""}</section>`;
   return h;
+}
+
+// ---------- week planner ----------
+function planName(plan, id) {
+  return L.findDay({ ...data, weekPlans: [plan] }, id)?.name || plan.extraDays.find((e) => e.id === id)?.name || "";
+}
+function renderPlanner() {
+  const thisMon = L.mondayOf(L.today());
+  const nextMon = L.addDays(thisMon, 7);
+  const active = (data.weekPlans || []).filter((p) => p.monday >= thisMon).sort((a, b) => a.monday.localeCompare(b.monday));
+  const p = ui.plan;
+  let h = `<section class="card"><h3>Plan je week</h3>`;
+  for (const a of active) h += `<div class="stack" style="gap:4px"><span class="label" style="color:var(--done)">${a.monday === thisMon ? "Deze week" : "Volgende week"} · aangepast</span>
+    ${a.slots.map((x) => `<div class="row small"><b style="width:28px">${L.dayShort(x.date)}</b><span class="grow">${esc(planName(a, x.dayId))}</span></div>`).join("")}
+    <button class="link muted" style="align-self:flex-start" data-a="planClear" data-m="${a.monday}">Planning wissen</button></div>`;
+  if (!p) {
+    h += `<p class="small muted">Druk week, of kun je op andere dagen dan normaal? Tik aan wanneer je kunt. Ik verdeel je trainingen zo dat er genoeg herstel tussen zit. Kun je minder vaak dan normaal, dan maak ik er combinatietrainingen van.</p>
+      <div class="row"><button class="btn outline grow" data-a="planStart" data-m="${thisMon}">Deze week</button><button class="btn outline grow" data-a="planStart" data-m="${nextMon}">Volgende week</button></div></section>`;
+    return h;
+  }
+  const dates = Array.from({ length: 7 }, (_, i) => L.addDays(p.monday, i));
+  const trained = new Set(data.sessions.map((s) => s.date));
+  h += `<p class="small">Op welke dagen kun je ${p.monday === thisMon ? "deze" : "volgende"} week trainen?</p>
+    <div class="chips" style="flex-wrap:wrap">${dates.map((dt) => {
+      const past = dt < L.today();
+      return `<button class="chip ${p.dates.includes(dt) ? "on" : ""}" ${past ? 'disabled style="opacity:.35"' : ""} data-a="planDay" data-d="${dt}">${L.dayShort(dt)} ${L.parseDate(dt).getDate()}${trained.has(dt) ? " ✓" : ""}</button>`;
+    }).join("")}</div>`;
+  if (p.result) {
+    const r = p.result;
+    if (r.slots.length) h += `<div class="stack" style="gap:6px">${r.slots.map((x) => {
+      const extra = r.extraDays.find((e) => e.id === x.dayId);
+      return `<div><div class="row"><b style="width:28px">${L.dayShort(x.date)}</b><span class="grow">${esc(planName(r, x.dayId))}</span></div>${extra ? `<p class="tiny muted" style="padding-left:36px">${extra.exercises.map((e) => esc(e.name)).join(" · ")}</p>` : ""}</div>`;
+    }).join("")}</div>`;
+    h += r.notes.map((n) => `<p class="small muted">${esc(n)}</p>`).join("");
+    h += `<div class="row"><button class="link muted" data-a="planCancel">Annuleren</button><span class="grow"></span>${r.slots.length ? `<button class="btn primary" data-a="planSave">Gebruik deze planning</button>` : ""}</div>`;
+  } else {
+    h += `<div class="row"><button class="link muted" data-a="planCancel">Annuleren</button><span class="grow"></span><button class="btn primary" data-a="planMake" ${p.dates.length ? "" : "disabled"}>Maak planning</button></div>`;
+  }
+  return h + `</section>`;
 }
 
 // ---------- feedback ----------
@@ -535,10 +575,10 @@ const actions = {
     if (Object.values(dr.items).flat().some((s) => s.done)) confirmSheet("Van dag wisselen?", "Je hebt vandaag al sets afgevinkt. Als je wisselt, worden die niet bewaard.", "Wissel en wis sets", go);
     else go();
   },
-  openEx: (t) => { const dr = currentDraft(); const day = data.program.days.find((x) => x.id === dr.dayId); const cur = ui.openEx ?? day.exercises.find((e) => dr.items[e.id]?.some((s) => !s.done))?.id; ui.openEx = cur === t.dataset.id ? "" : t.dataset.id; render(); },
+  openEx: (t) => { const dr = currentDraft(); const day = L.findDay(data, dr.dayId); const cur = ui.openEx ?? day.exercises.find((e) => dr.items[e.id]?.some((s) => !s.done))?.id; ui.openEx = cur === t.dataset.id ? "" : t.dataset.id; render(); },
   shuffle: (t) => {
     const dr = currentDraft();
-    const day = data.program.days.find((x) => x.id === dr.dayId);
+    const day = L.findDay(data, dr.dayId);
     const slot = day.exercises.find((e) => e.id === t.dataset.id);
     const shownId = dr.swaps[slot.id] || slot.id;
     const shown = L.exercise(data, shownId) || slot;
@@ -552,7 +592,7 @@ const actions = {
     update((d) => ({ ...d, draft: { ...dr, swaps, items: { ...dr.items, [slot.id]: L.draftSets(d, pick, slot.sets, slot.dropSets) } } }));
   },
   kgStep: (t) => {
-    const dr = currentDraft(); const day = data.program.days.find((x) => x.id === dr.dayId);
+    const dr = currentDraft(); const day = L.findDay(data, dr.dayId);
     const slot = day.exercises.find((e) => e.id === t.dataset.id);
     const e = (dr.swaps[slot.id] && L.exercise(data, dr.swaps[slot.id])) || slot;
     editSet(slot.id, +t.dataset.i, (s) => ({ ...s, kg: L.fmt(Math.max(0, L.round1(L.toKg(s.kg) + +t.dataset.by * e.inc))) })); render();
@@ -567,8 +607,7 @@ const actions = {
     if (ui.rating || text) update((d) => ({ ...d, feedback: [...d.feedback, { id: "f" + Date.now(), date: L.today(), kind: "Training", text, rating: ui.rating, context: t.dataset.ctx, sent: false }] }));
     closeSheet();
   },
-  rest30: () => { ui.restEnds += 30000; ui.restTotal += 30; renderTimer(); },
-  restStop: () => { ui.restEnds = 0; renderTimer(); },
+  restStop: () => { ui.restStart = 0; renderTimer(); },
 
   sDay: (t) => { ui.schemaDay = t.dataset.id; ui.schemaEx = null; render(); },
   addDay: () => { const id = "d" + Date.now(); editProgram((p) => L.addDay(p, id)); ui.schemaDay = id; render(); },
@@ -621,7 +660,7 @@ const actions = {
     () => { update((d) => ({ ...d, program: L.expandToFour(d.program), draft: null })); toast("Vierde dag toegevoegd"); }),
   toThree: () => confirmSheet("Terug naar 3 dagen?", "De vierde dag gaat uit je schema en je weekdoel wordt 3. Gelogde trainingen blijven bewaard.", "Terug naar 3",
     () => update((d) => ({ ...d, program: L.backToThree(d.program), draft: null }))),
-  feedback: () => feedbackSheet(ui.tab === "training" ? data.program.days.find((x) => x.id === currentDraft().dayId)?.name : ""),
+  feedback: () => feedbackSheet(ui.tab === "training" ? L.findDay(data, currentDraft().dayId)?.name : ""),
   fbKind: (t) => { const txt = $("#fbText")?.value; ui.fbKind = t.dataset.k; renderSheet(); if (txt) $("#fbText").value = txt; },
   saveFeedback: (t) => {
     const text = $("#fbText").value.trim();
@@ -637,6 +676,22 @@ const actions = {
   export: () => exportBackup(),
   import: () => importBackup(),
   topic: (t) => { ui.topic = ui.topic === +t.dataset.i ? null : +t.dataset.i; render(); },
+  planStart: (t) => { ui.plan = { monday: t.dataset.m, dates: [], result: null }; render(); },
+  planDay: (t) => { const d = t.dataset.d; const ds = ui.plan.dates; ui.plan = { ...ui.plan, result: null, dates: ds.includes(d) ? ds.filter((x) => x !== d) : [...ds, d] }; render(); },
+  planMake: () => { ui.plan = { ...ui.plan, result: L.planWeek(data, ui.plan.monday, ui.plan.dates) }; render(); },
+  planCancel: () => { ui.plan = null; render(); },
+  planSave: () => {
+    const r = ui.plan.result;
+    ui.plan = null;
+    update((d) => {
+      const keepDraft = d.draft && d.draft.date === L.today() && Object.values(d.draft.items).flat().some((s) => s.done);
+      return { ...d, weekPlans: [...(d.weekPlans || []).filter((x) => x.monday !== r.monday), { monday: r.monday, slots: r.slots, extraDays: r.extraDays }], draft: keepDraft ? d.draft : null };
+    });
+    toast("Planning opgeslagen");
+  },
+  planClear: (t) => confirmSheet("Planning wissen?", "Je gaat terug naar je normale schema voor die week.", "Wissen",
+    () => update((d) => ({ ...d, weekPlans: (d.weekPlans || []).filter((x) => x.monday !== t.dataset.m), draft: null }))),
+  restTimer: () => { ui.restStart = 0; update((d) => ({ ...d, settings: { ...d.settings, restTimer: !d.settings.restTimer } })); },
   toggleSrc: () => { ui.srcOpen = !ui.srcOpen; render(); },
   close: () => closeSheet(),
   confirmOk: () => { const f = ui.confirmOk; ui.confirmOk = null; ui.sheet = null; renderSheet(); f?.(); },

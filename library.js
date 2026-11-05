@@ -86,5 +86,6 @@ export const SOURCES = [
   "Hunter (2014). Sex differences in human fatigability: mechanisms and insight to physiological responses. Acta Physiologica.",
   "Colenso-Semple et al. (2023). Current evidence shows no influence of women's menstrual cycle phase on acute strength performance or adaptations to resistance exercise training. Frontiers in Sports and Active Living.",
   "McNulty et al. (2020). The effects of menstrual cycle phase on exercise performance in eumenorrheic women: a systematic review and meta-analysis. Sports Medicine.",
-  "Lally, van Jaarsveld, Potts & Wardle (2010). How are habits formed: modelling habit formation in the real world. European Journal of Social Psychology."
+  "Lally, van Jaarsveld, Potts & Wardle (2010). How are habits formed: modelling habit formation in the real world. European Journal of Social Psychology.",
+  "Bickel, Cross & Bamman (2011). Exercise dosing to retain resistance training adaptations in young and older adults. Medicine & Science in Sports & Exercise."
 ];

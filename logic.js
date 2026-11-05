@@ -106,7 +106,7 @@ export function fourthDay() {
 }
 
 export function emptyData() {
-  return { version: 1, program: starterProgram(), sessions: [], weights: [], draft: null, customExercises: [], feedback: [] };
+  return { version: 1, program: starterProgram(), sessions: [], weights: [], draft: null, customExercises: [], feedback: [], weekPlans: [], settings: { restTimer: false } };
 }
 
 // ---------- lookups ----------
@@ -127,6 +127,15 @@ export const weekOf = (d, date) => Math.max(1, Math.floor(daysBetween(d.program.
 export const currentWeek = (d) => weekOf(d, today());
 export const inCycle = (d) => d.sessions.filter((s) => s.date >= d.program.startDate).sort((a, b) => a.date.localeCompare(b.date));
 export const weeklyTarget = (d) => Math.max(1, d.program.weeklyTarget ?? d.program.days.length);
+
+/** The adjusted plan for the week that starts on `monday`, if she made one with the week planner. */
+export const planFor = (d, monday) => (d.weekPlans || []).find((p) => p.monday === monday) || null;
+export const currentPlan = (d) => planFor(d, mondayOf(today()));
+/** Trainings that count as "on schedule" in a calendar week: the planned number when she adjusted that week. */
+export const targetForWeek = (d, monday) => planFor(d, monday)?.slots.length ?? weeklyTarget(d);
+/** Program days plus this week's combined workouts from the planner, so the Training tab can log them. */
+export const trainingDays = (d) => [...d.program.days, ...(currentPlan(d)?.extraDays || [])];
+export const findDay = (d, id) => trainingDays(d).find((x) => x.id === id) || (d.weekPlans || []).flatMap((p) => p.extraDays || []).find((x) => x.id === id);
 export const cycleSessions = (d) => weeklyTarget(d) * CYCLE_WEEKS;
 
 export function weekStats(d) {
@@ -134,7 +143,7 @@ export function weekStats(d) {
   return Array.from({ length: CYCLE_WEEKS }, (_, i) => {
     const w = i + 1;
     const list = ss.filter((s) => weekOf(d, s.date) === w);
-    return { week: w, sessions: list.length, volume: list.reduce((a, s) => a + volume(s), 0) };
+    return { week: w, sessions: list.length, volume: list.reduce((a, s) => a + volume(s), 0), target: targetForWeek(d, addDays(d.program.startDate, (w - 1) * 7)) };
   });
 }
 
@@ -142,11 +151,10 @@ export function weekStats(d) {
 export function streak(d) {
   const stats = weekStats(d);
   const cur = Math.min(currentWeek(d), CYCLE_WEEKS);
-  const target = weeklyTarget(d);
-  let w = stats[cur - 1].sessions >= target ? cur : cur - 1;
+  let w = stats[cur - 1].sessions >= stats[cur - 1].target ? cur : cur - 1;
   let n = 0, joker = true;
   while (w >= 1) {
-    if (stats[w - 1].sessions >= target) n++;
+    if (stats[w - 1].sessions >= stats[w - 1].target) n++;
     else if (joker && n > 0) joker = false;
     else break;
     w--;
@@ -237,7 +245,7 @@ export function draftSets(d, e, count, drops = 0) {
 }
 
 export function freshDraft(d, dayId) {
-  const day = d.program.days.find((x) => x.id === dayId) || d.program.days[0];
+  const day = findDay(d, dayId) || d.program.days[0];
   const items = {};
   for (const e of day.exercises) items[e.id] = draftSets(d, e, e.sets, e.dropSets);
   return { date: today(), dayId: day.id, items, swaps: {} };
@@ -245,7 +253,7 @@ export function freshDraft(d, dayId) {
 
 /** Keeps today's draft in step with a schema edited in the meantime; finished sets are never thrown away. */
 export function reconcile(d, draft) {
-  const day = d.program.days.find((x) => x.id === draft.dayId);
+  const day = findDay(d, draft.dayId);
   if (!day) return freshDraft(d, nextDayId(d));
   let changed = false;
   const items = { ...draft.items };
@@ -260,9 +268,24 @@ export function reconcile(d, draft) {
   return changed ? { ...draft, items } : draft;
 }
 
-/** The day to train next: the one after the day trained last. */
+/**
+ * The day to train next. With a week plan: today's planned workout, else the first planned one
+ * not yet done. Without: the one after the day trained last.
+ */
 export function nextDayId(d) {
-  const last = [...d.sessions].sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id)).pop();
+  const plan = currentPlan(d);
+  if (plan) {
+    const done = new Set(d.sessions.filter((s) => s.date >= plan.monday).map((s) => s.dayId));
+    const open = plan.slots.filter((x) => !done.has(x.dayId));
+    const pick = open.find((x) => x.date === today()) || open.find((x) => x.date > today()) || open[0];
+    if (pick && findDay(d, pick.dayId)) return pick.dayId;
+  }
+  return nextProgramDay(d);
+}
+
+function nextProgramDay(d) {
+  const ids = new Set(d.program.days.map((x) => x.id));
+  const last = d.sessions.filter((s) => ids.has(s.dayId)).sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id)).pop();
   if (!last) return d.program.days[0].id;
   const i = d.program.days.findIndex((x) => x.id === last.dayId);
   return d.program.days[(i + 1) % d.program.days.length].id;
@@ -386,4 +409,108 @@ export function coachNudges(d) {
   const cw = consistentWeeks(d, 3);
   if (!hasFourthDay(d.program) && cw >= READY_WEEKS) out.push({ tag: "Klaar voor meer", text: `Je haalt al ${cw} weken op rij al je trainingen. Je bent klaar om naar 4 dagen te gaan: zie hieronder.` });
   return out.slice(0, 4);
+}
+
+// ---------- week planner ----------
+const DAY_NAMES = ["ma", "di", "wo", "do", "vr", "za", "zo"];
+export const dayShort = (date) => DAY_NAMES[(parseDate(date).getDay() + 6) % 7];
+
+/** A day counts as a glute/leg day when it holds at least 6 weekly sets for glutes, quads or hamstrings. */
+export function isLowerDay(day) {
+  const m = muscleSets({ days: [day] });
+  return (m.bilspieren || 0) + (m.quadriceps || 0) + (m.hamstrings || 0) >= 6;
+}
+
+/**
+ * Puts the workouts on the dates she has. Glute and leg days get at least 48 hours between
+ * them where the dates allow it; two trainings on consecutive days cost a little; spreading
+ * the week evenly wins ties. Brute force: at most 7 dates and 4 workouts.
+ */
+function bestSchedule(dates, days, lastLowerDate) {
+  let best = null;
+  const choose = (start, k, acc, out) => { if (acc.length === k) { out.push([...acc]); return; } for (let i = start; i < dates.length; i++) { acc.push(dates[i]); choose(i + 1, k, acc, out); acc.pop(); } };
+  const perms = (arr) => (arr.length <= 1 ? [arr] : arr.flatMap((x, i) => perms([...arr.slice(0, i), ...arr.slice(i + 1)]).map((p) => [x, ...p])));
+  const subsets = [];
+  choose(0, days.length, [], subsets);
+  // Keep the program order (A, upper, B …) unless a different order clearly recovers better.
+  const orders = perms(days.map((_, i) => i));
+  for (const ds of subsets) for (const order of orders) {
+    let score = 0;
+    const seq = order.map((i, j) => ({ date: ds[j], day: days[i], lower: isLowerDay(days[i]) }));
+    const lowers = seq.filter((x) => x.lower).map((x) => x.date);
+    if (lastLowerDate && lowers.length) lowers.unshift(lastLowerDate);
+    for (let i = 1; i < lowers.length; i++) { const gap = daysBetween(lowers[i - 1], lowers[i]); if (gap < 2) score -= 10 * (2 - gap); }
+    for (let i = 1; i < seq.length; i++) {
+      const gap = daysBetween(seq[i - 1].date, seq[i].date);
+      if (gap === 1) score -= 1;
+      score += Math.min(gap, 3) * 0.1;
+    }
+    order.forEach((i, j) => { if (i !== j) score -= 0.05; });
+    if (!best || score > best.score) best = { score, slots: seq.map((x) => ({ date: x.date, dayId: x.day.id })) };
+  }
+  return best?.slots || [];
+}
+
+/**
+ * Fewer dates than workouts: merge workouts into full-body sessions. Leg days are spread over the
+ * sessions first, the upper body is added to the session with the least work. From each merged
+ * day the first exercises are kept, which are the heavy main lifts.
+ */
+function mergeDays(days, n, monday) {
+  const buckets = Array.from({ length: n }, () => []);
+  const lower = days.filter(isLowerDay), upper = days.filter((x) => !isLowerDay(x));
+  lower.forEach((x, i) => buckets[i % n].push(x));
+  for (const x of upper) buckets.sort((a, b) => a.length - b.length)[0].push(x);
+  return buckets.filter((b) => b.length).map((b, i) => {
+    if (b.length === 1) return b[0];
+    const per = b.length === 2 ? 3 : 2;
+    const exercises = [];
+    for (const day of b) {
+      const take = day.exercises.slice(0, per);
+      take.forEach((e, j) => exercises.push({ ...e, supersetWithNext: e.supersetWithNext && j < take.length - 1 }));
+    }
+    const seen = new Set();
+    return {
+      id: `wp${monday.replace(/-/g, "")}${i + 1}`,
+      name: "Combi: " + b.map((x) => x.name.replace("Billen & benen", "Billen")).join(" + "),
+      exercises: exercises.filter((e) => !seen.has(e.id) && seen.add(e.id)),
+      combined: b.map((x) => x.id),
+    };
+  });
+}
+
+/**
+ * The week planner behind "Plan je week" in Coach. `dates` are the days she can train.
+ * Returns a plan to show first and save only when she confirms.
+ */
+export function planWeek(d, monday, dates) {
+  const sorted = [...new Set(dates)].sort();
+  const doneThisWeek = d.sessions.filter((s) => s.date >= monday && s.date < addDays(monday, 7));
+  // A combined workout covers the program days it was made from.
+  const doneIds = new Set(doneThisWeek.flatMap((s) => findDay(d, s.dayId)?.combined || [s.dayId]));
+  // The rest of the rotation, starting with the workout that is due.
+  const order = [];
+  const startId = nextProgramDay({ ...d, sessions: d.sessions.filter((s) => s.date < monday) });
+  const i0 = Math.max(0, d.program.days.findIndex((x) => x.id === startId));
+  for (let k = 0; k < d.program.days.length; k++) order.push(d.program.days[(i0 + k) % d.program.days.length]);
+  const todo = order.filter((x) => !doneIds.has(x.id) && x.exercises.length).slice(0, Math.max(0, weeklyTarget(d) - doneThisWeek.length));
+  const lastLower = d.sessions.filter((s) => s.date < (sorted[0] || monday)).sort((a, b) => b.date.localeCompare(a.date))
+    .find((s) => { const day = findDay(d, s.dayId); return day && isLowerDay(day); })?.date;
+
+  if (!sorted.length || !todo.length) return { monday, slots: [], extraDays: [], notes: [todo.length ? "Kies minstens één dag." : "Je hebt je trainingen van deze week al gedaan. Lekker bezig!"] };
+  const notes = [];
+  let days = todo, extraDays = [];
+  if (sorted.length < todo.length) {
+    days = mergeDays(todo, sorted.length, monday);
+    extraDays = days.filter((x) => x.combined);
+    notes.push(`Je hebt ${sorted.length} ${sorted.length === 1 ? "dag" : "dagen"} voor ${todo.length} trainingen. Ik combineer ze tot ${sorted.length === 1 ? "één full-body training" : `${sorted.length} full-body trainingen`} met de zware basisoefeningen van elke dag, zodat al je spiergroepen aan bod komen.`);
+    notes.push("Je doet deze week minder sets dan normaal. Dat is geen probleem: in onderzoek bleef spiermassa behouden met ongeveer een derde van het normale volume, zolang de zwaarte bleef [31]. Train deze sessies dus gewoon zwaar, met 1–2 reps over.");
+  }
+  const slots = bestSchedule(sorted, days, lastLower);
+  const lowers = slots.filter((x) => isLowerDay(days.find((y) => y.id === x.dayId)));
+  let tight = false;
+  for (let i = 1; i < lowers.length; i++) if (daysBetween(lowers[i - 1].date, lowers[i].date) < 2) tight = true;
+  if (lowers.length > 1 && !tight) notes.unshift("Tussen je billen- en beendagen zit minstens 48 uur, zodat je spieren kunnen herstellen. Een bovenlichaamdag mag er gerust tussen of direct naast.");
+  if (tight) notes.unshift("Twee beendagen liggen dichter dan 48 uur bij elkaar; met deze dagen kan het niet anders. Houd op de tweede dag 2–3 reps over en sla zo nodig de laatste set over.");
+  return { monday, slots, extraDays, notes };
 }
